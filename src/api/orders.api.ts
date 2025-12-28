@@ -802,6 +802,69 @@ export const isQuotationFinal = (order: ApiOrder): boolean => {
 };
 
 // =============================================================================
+// UPDATE ORDER STATUS (For post-booking stage transitions)
+// =============================================================================
+
+/**
+ * Update order status for stage transitions
+ * Used for: order_booked → processing → shipped → delivered
+ */
+export const updateOrderStatus = async (
+    orderId: string,
+    newStatus: string,
+    note?: string
+): Promise<ApiOrder> => {
+    try {
+        // Map frontend status to backend status
+        const statusMap: Record<string, string> = {
+            'processing': 'PAID',           // Order model uses PAID instead of PROCESSING
+            'shipped': 'SHIPPED',
+            'delivered': 'DELIVERED',
+            'completed': 'DELIVERED',       // Map to DELIVERED
+        };
+
+        const backendStatus = statusMap[newStatus] || newStatus.toUpperCase();
+
+        const payload = {
+            orderId: orderId,
+            values: {
+                status: backendStatus,
+                ...(note && { notes: note }),
+            },
+        };
+
+        console.log('Updating order status with payload:', payload);
+
+        const response = await apiClient.patch<BackendOrder | { message: string; order: BackendOrder }>(
+            '/orders/update',
+            payload
+        );
+
+        if (response.data) {
+            const responseData = response.data as any;
+            if (responseData.order) {
+                return transformOrderToFrontend(responseData.order);
+            }
+            if (responseData._id) {
+                return transformOrderToFrontend(responseData as BackendOrder);
+            }
+        }
+
+        // Fallback: refetch
+        const allOrders = await listAllOrdersAndQuotations();
+        const updated = allOrders.find(o => o._id === orderId || o.orderId === orderId);
+
+        if (updated) return updated;
+
+        throw new Error('Status updated but could not retrieve updated data');
+
+    } catch (error: any) {
+        console.error('Error updating order status:', error);
+        throw error;
+    }
+};
+
+// =============================================================================
 // EXPORT ALL
 // =============================================================================
 
@@ -825,6 +888,7 @@ const ordersApi = {
     rejectCounter: rejectCounter,
     acceptQuoteRequest: acceptQuoteRequest,
     rejectQuoteRequest: rejectQuoteRequest,
+    updateOrderStatus: updateOrderStatus,
 
     // Helpers
     needsAdminAction,

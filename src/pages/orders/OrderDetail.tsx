@@ -84,6 +84,7 @@ import {
   useRejectCounter,
   useAcceptQuoteRequest,
   useRejectQuoteRequest,
+  useUpdateOrderStatus,
 } from '@/hooks/useApi';
 import type { ApiCustomer } from '@/api/customers.api';
 import type { ApiOrder } from '@/api/orders.api';
@@ -152,6 +153,7 @@ export default function OrderDetail() {
   const rejectCounterMutation = useRejectCounter();
   const acceptQuoteRequestMutation = useAcceptQuoteRequest();
   const rejectQuoteRequestMutation = useRejectQuoteRequest();
+  const updateStatusMutation = useUpdateOrderStatus();
 
   // State
   const [showEditDialog, setShowEditDialog] = useState(false);
@@ -159,6 +161,10 @@ export default function OrderDetail() {
   const [showSendQuoteDialog, setShowSendQuoteDialog] = useState(false);
   const [quotedPrices, setQuotedPrices] = useState<Record<string, number>>({});
   const [quoteNotes, setQuoteNotes] = useState('');
+  const [showProcessingDialog, setShowProcessingDialog] = useState(false);
+  const [showShippedDialog, setShowShippedDialog] = useState(false);
+  const [showDeliveredDialog, setShowDeliveredDialog] = useState(false);
+  const [transitionNote, setTransitionNote] = useState('');
 
   // Confirmation dialogs
   const [showAcceptDialog, setShowAcceptDialog] = useState(false);
@@ -491,6 +497,98 @@ export default function OrderDetail() {
       console.error('Failed to reject:', error);
     }
   };
+
+  // =============================================================================
+  // STATUS TRANSITION HANDLERS (Post-booking stages)
+  // =============================================================================
+
+  // Handle transition to Processing
+  const handleConfirmProcessing = async () => {
+    if (!apiOrder) return;
+
+    try {
+      await updateStatusMutation.mutateAsync({
+        orderId: apiOrder.orderId || apiOrder._id,
+        newStatus: 'processing',
+        note: transitionNote || undefined,
+      });
+
+      toast({
+        title: 'Order Processing Started',
+        description: 'Order has been moved to processing stage.',
+      });
+
+      setShowProcessingDialog(false);
+      setTransitionNote('');
+      refetch();
+    } catch (error) {
+      console.error('Failed to update status:', error);
+      toast({
+        title: 'Error',
+        description: 'Failed to update order status.',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  // Handle transition to Shipped
+  const handleConfirmShipped = async () => {
+    if (!apiOrder) return;
+
+    try {
+      await updateStatusMutation.mutateAsync({
+        orderId: apiOrder.orderId || apiOrder._id,
+        newStatus: 'shipped',
+        note: transitionNote || undefined,
+      });
+
+      toast({
+        title: 'Shipment Booked',
+        description: 'Order has been marked as shipped.',
+      });
+
+      setShowShippedDialog(false);
+      setTransitionNote('');
+      refetch();
+    } catch (error) {
+      console.error('Failed to update status:', error);
+      toast({
+        title: 'Error',
+        description: 'Failed to update order status.',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  // Handle transition to Delivered
+  const handleConfirmDelivered = async () => {
+    if (!apiOrder) return;
+
+    try {
+      await updateStatusMutation.mutateAsync({
+        orderId: apiOrder.orderId || apiOrder._id,
+        newStatus: 'delivered',
+        note: transitionNote || undefined,
+      });
+
+      toast({
+        title: 'Order Delivered',
+        description: 'Order has been marked as delivered.',
+      });
+
+      setShowDeliveredDialog(false);
+      setTransitionNote('');
+      refetch();
+    } catch (error) {
+      console.error('Failed to update status:', error);
+      toast({
+        title: 'Error',
+        description: 'Failed to update order status.',
+        variant: 'destructive',
+      });
+    }
+  };
+
 
   // Initialize edit form
   const initializeEditForm = () => {
@@ -1041,6 +1139,72 @@ export default function OrderDetail() {
               </Card>
           )}
 
+          {/* ➕ ADD THIS - Next Stage Actions (Post-booking) */}
+          {['order_booked', 'payment_pending', 'paid', 'processing', 'shipped'].includes(frontendStatus) && (
+              <Card className="border-blue-200 bg-blue-50">
+                <CardContent className="p-6">
+                  <div className="flex items-start gap-4">
+                    <Clock className="h-8 w-8 text-blue-600 mt-1" />
+                    <div className="flex-1">
+                      <h3 className="font-semibold text-lg text-blue-800">
+                        Next Action Required
+                      </h3>
+                      <p className="text-blue-700 mt-1">
+                        {frontendStatus === 'order_booked' && 'Order is confirmed. Ready to start processing?'}
+                        {frontendStatus === 'payment_pending' && 'Payment is pending. You can still start processing the order.'}
+                        {frontendStatus === 'paid' && 'Payment received. Ready to ship the order?'}
+                        {frontendStatus === 'processing' && 'Order is being processed. Ready to book shipment?'}
+                        {frontendStatus === 'shipped' && 'Order has been shipped. Confirm delivery when complete.'}
+                      </p>
+
+                      {/* Action Buttons */}
+                      <div className="flex flex-wrap gap-3 mt-4">
+                        {(frontendStatus === 'order_booked' || frontendStatus === 'payment_pending') && (
+                            <Button
+                                onClick={() => setShowProcessingDialog(true)}
+                                className="bg-blue-600 hover:bg-blue-700"
+                            >
+                              <Check className="h-4 w-4 mr-2" />
+                              Start Processing
+                            </Button>
+                        )}
+
+                        {frontendStatus === 'paid' && (
+                            <Button
+                                onClick={() => setShowShippedDialog(true)}
+                                className="bg-cyan-600 hover:bg-cyan-700"
+                            >
+                              <Check className="h-4 w-4 mr-2" />
+                              Mark as Shipped
+                            </Button>
+                        )}
+
+                        {frontendStatus === 'processing' && (
+                            <Button
+                                onClick={() => setShowShippedDialog(true)}
+                                className="bg-cyan-600 hover:bg-cyan-700"
+                            >
+                              <Check className="h-4 w-4 mr-2" />
+                              Mark as Shipped
+                            </Button>
+                        )}
+
+                        {frontendStatus === 'shipped' && (
+                            <Button
+                                onClick={() => setShowDeliveredDialog(true)}
+                                className="bg-emerald-600 hover:bg-emerald-700"
+                            >
+                              <Check className="h-4 w-4 mr-2" />
+                              Mark as Delivered
+                            </Button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+          )}
+
           {/* Progress Stepper */}
           <OrderProgressStepper
               currentStatus={frontendStatus}
@@ -1554,6 +1718,171 @@ export default function OrderDetail() {
             onSend={handleDialogSend}
             printRef={printRef}
         />
+        {/* Processing Confirmation Dialog */}
+        <Dialog open={showProcessingDialog} onOpenChange={setShowProcessingDialog}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Start Processing Order</DialogTitle>
+              <DialogDescription>
+                This will move the order to the processing stage. The customer will be notified.
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="py-4 space-y-4">
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                <p className="text-sm text-blue-700">
+                  <strong>Order:</strong> {order.orderNumber}
+                </p>
+                <p className="text-sm text-blue-700">
+                  <strong>Items:</strong> {apiOrder?.items?.length || 0} products
+                </p>
+                <p className="text-sm text-blue-700">
+                  <strong>Total:</strong> ₹{companyQuotedTotal.toLocaleString()}
+                </p>
+              </div>
+
+              <div>
+                <Label>Note (Optional)</Label>
+                <Textarea
+                    value={transitionNote}
+                    onChange={(e) => setTransitionNote(e.target.value)}
+                    placeholder="Add a note about this status change..."
+                    rows={2}
+                />
+              </div>
+            </div>
+
+            <DialogFooter>
+              <Button variant="outline" onClick={() => {
+                setShowProcessingDialog(false);
+                setTransitionNote('');
+              }}>
+                Cancel
+              </Button>
+              <Button
+                  onClick={handleConfirmProcessing}
+                  disabled={updateStatusMutation.isPending}
+                  className="bg-blue-600 hover:bg-blue-700"
+              >
+                {updateStatusMutation.isPending && (
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                )}
+                <Check className="h-4 w-4 mr-2" />
+                Confirm Processing
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Shipped Confirmation Dialog */}
+        <Dialog open={showShippedDialog} onOpenChange={setShowShippedDialog}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Mark as Shipped</DialogTitle>
+              <DialogDescription>
+                This will mark the order as shipped. The customer will be notified with tracking information.
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="py-4 space-y-4">
+              <div className="bg-cyan-50 border border-cyan-200 rounded-lg p-4">
+                <p className="text-sm text-cyan-700">
+                  <strong>Order:</strong> {order.orderNumber}
+                </p>
+                <p className="text-sm text-cyan-700">
+                  <strong>Shipping To:</strong> {order.shippingAddress?.city}, {order.shippingAddress?.state}
+                </p>
+              </div>
+
+              <div>
+                <Label>Shipping Note / Tracking Info (Optional)</Label>
+                <Textarea
+                    value={transitionNote}
+                    onChange={(e) => setTransitionNote(e.target.value)}
+                    placeholder="Add tracking number or shipping details..."
+                    rows={2}
+                />
+              </div>
+            </div>
+
+            <DialogFooter>
+              <Button variant="outline" onClick={() => {
+                setShowShippedDialog(false);
+                setTransitionNote('');
+              }}>
+                Cancel
+              </Button>
+              <Button
+                  onClick={handleConfirmShipped}
+                  disabled={updateStatusMutation.isPending}
+                  className="bg-cyan-600 hover:bg-cyan-700"
+              >
+                {updateStatusMutation.isPending && (
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                )}
+                <Check className="h-4 w-4 mr-2" />
+                Confirm Shipment
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Delivered Confirmation Dialog */}
+        <Dialog open={showDeliveredDialog} onOpenChange={setShowDeliveredDialog}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Confirm Delivery</DialogTitle>
+              <DialogDescription>
+                This will mark the order as delivered. This action completes the order fulfillment.
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="py-4 space-y-4">
+              <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-4">
+                <p className="text-sm text-emerald-700">
+                  <strong>Order:</strong> {order.orderNumber}
+                </p>
+                <p className="text-sm text-emerald-700">
+                  <strong>Customer:</strong> {order.customer?.name}
+                </p>
+                <p className="text-sm text-emerald-700">
+                  <strong>Total Value:</strong> ₹{companyQuotedTotal.toLocaleString()}
+                </p>
+              </div>
+
+              <div>
+                <Label>Delivery Note (Optional)</Label>
+                <Textarea
+                    value={transitionNote}
+                    onChange={(e) => setTransitionNote(e.target.value)}
+                    placeholder="Add delivery confirmation details..."
+                    rows={2}
+                />
+              </div>
+            </div>
+
+            <DialogFooter>
+              <Button variant="outline" onClick={() => {
+                setShowDeliveredDialog(false);
+                setTransitionNote('');
+              }}>
+                Cancel
+              </Button>
+              <Button
+                  onClick={handleConfirmDelivered}
+                  disabled={updateStatusMutation.isPending}
+                  className="bg-emerald-600 hover:bg-emerald-700"
+              >
+                {updateStatusMutation.isPending && (
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                )}
+                <Check className="h-4 w-4 mr-2" />
+                Confirm Delivery
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </DashboardLayout>
+
   );
 }

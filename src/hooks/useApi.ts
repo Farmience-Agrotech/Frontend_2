@@ -415,6 +415,33 @@ export function useRejectQuoteRequest() {
 }
 
 // =============================================================================
+// UPDATE ORDER STATUS MUTATION (For stage transitions)
+// =============================================================================
+
+export const useUpdateOrderStatus = () => {
+    const queryClient = useQueryClient();
+
+    return useMutation({
+        mutationFn: ({
+                         orderId,
+                         newStatus,
+                         note
+                     }: {
+            orderId: string;
+            newStatus: string;
+            note?: string;
+        }) => ordersApi.updateOrderStatus(orderId, newStatus, note),
+
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['orders'] });
+        },
+        onError: (error: any) => {
+            console.error('Failed to update order status:', error);
+        },
+    });
+};
+
+// =============================================================================
 // INVENTORY HOOKS
 // =============================================================================
 
