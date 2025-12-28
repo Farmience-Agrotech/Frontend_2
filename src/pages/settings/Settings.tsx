@@ -60,12 +60,12 @@ export default function Settings() {
               <Landmark className="h-4 w-4 hidden sm:block" />
               Bank Details
             </TabsTrigger>
-            {canViewUserManagement && (
+            {/* {canViewUserManagement && (
               <TabsTrigger value="users-roles" className="gap-2">
                 <Shield className="h-4 w-4 hidden sm:block" />
                 Users & Roles
               </TabsTrigger>
-            )}
+            )} */}
           </TabsList>
 
           {/* Tab 1: My Profile */}
@@ -356,11 +356,11 @@ export default function Settings() {
           </TabsContent>
 
           {/* Tab 5: Users & Roles */}
-          {canViewUserManagement && (
+          {/* {canViewUserManagement && (
             <TabsContent value="users-roles">
               <UsersRolesTab />
             </TabsContent>
-          )}
+          )} */}
         </Tabs>
       </div>
     </DashboardLayout>
