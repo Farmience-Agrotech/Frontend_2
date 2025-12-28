@@ -1,5 +1,5 @@
 // =============================================================================
-// ORDERS API SERVICE (With Quotation Support)
+// ORDERS API SERVICE (With Quotation Support - FIXED)
 // =============================================================================
 import apiClient from './client';
 import { Order, CreateOrderRequest } from '@/types/api.types';
@@ -115,34 +115,36 @@ export interface ApiOrder {
     createdAt: string;
     updatedAt: string;
 
-    // NEW: Quotation-specific fields
+    // Quotation-specific fields
     isQuotation: boolean;     // true if from quotation endpoint
     sourceType: 'order' | 'quotation';
 }
 
 // =============================================================================
-// STATUS MAPPING
+// STATUS MAPPING - FIXED!
 // =============================================================================
 
 /**
- * Backend only accepts these 4 statuses for quotations:
- * - PENDING: Customer requested quote, waiting for admin
- * - NEGOTIATING: Admin sent quote / Counter-offer in progress
- * - ACCEPTED: Customer accepted the quote
- * - REJECTED: Customer rejected the quote
+ * Backend Quotation Statuses:
+ * - PENDING: Customer requested quote → ADMIN's turn
+ * - QUOTE_SENT: Admin sent quote → CUSTOMER's turn
+ * - NEGOTIATING: Customer counter-offered → ADMIN's turn
+ * - ACCEPTED: Deal done (either party accepted)
+ * - REJECTED: No deal (either party rejected)
  */
 
 /**
- * Map various backend statuses to unified display status
+ * Map backend statuses to frontend display status
  */
 const mapStatus = (status: string, isQuotation: boolean): string => {
-    // Quotation status mapping (backend uses 4 statuses)
+    // Quotation status mapping
     if (isQuotation) {
         const quotationStatusMap: Record<string, string> = {
-            'PENDING': 'quote_requested',
-            'NEGOTIATING': 'quote_sent',
-            'ACCEPTED': 'order_booked',
-            'REJECTED': 'rejected',
+            'PENDING': 'quote_requested',       // Admin needs to send quote
+            'QUOTE_SENT': 'quote_sent',         // Customer needs to respond
+            'NEGOTIATING': 'negotiation',       // Admin needs to respond to counter
+            'ACCEPTED': 'order_booked',         // Deal done!
+            'REJECTED': 'rejected',             // No deal
         };
         return quotationStatusMap[status] || 'quote_requested';
     }
@@ -279,7 +281,7 @@ export const listOrders = async (): Promise<ApiOrder[]> => {
         return backendData.map(transformOrderToFrontend);
     } catch (error) {
         console.error('Error fetching orders:', error);
-        return []; // Return empty array instead of throwing
+        return [];
     }
 };
 
@@ -311,7 +313,7 @@ export const listQuotations = async (): Promise<ApiOrder[]> => {
         return backendData.map(transformQuotationToFrontend);
     } catch (error) {
         console.error('Error fetching quotations:', error);
-        return []; // Return empty array instead of throwing
+        return [];
     }
 };
 
@@ -325,7 +327,6 @@ export const listQuotations = async (): Promise<ApiOrder[]> => {
  */
 export const listAllOrdersAndQuotations = async (): Promise<ApiOrder[]> => {
     try {
-        // Fetch both in parallel
         const [orders, quotations] = await Promise.all([
             listOrders(),
             listQuotations(),
@@ -333,7 +334,6 @@ export const listAllOrdersAndQuotations = async (): Promise<ApiOrder[]> => {
 
         console.log(`Fetched ${orders.length} orders and ${quotations.length} quotations`);
 
-        // Merge and sort by date (newest first)
         const merged = [...orders, ...quotations];
         merged.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 
@@ -406,7 +406,6 @@ export const updateOrder = async (
             }
         }
 
-        // Refetch to get updated data
         const allOrders = await listAllOrdersAndQuotations();
         const updatedOrder = allOrders.find(o => o._id === id || o.orderId === orderIdToUse);
 
@@ -450,7 +449,6 @@ export const updateQuotation = async (
 
         console.log('Updating quotation with payload:', payload);
 
-        // Use PATCH method as per backend API spec
         const response = await apiClient.patch<BackendQuotation | { message: string; quotation: BackendQuotation }>(
             '/orders/quotation/update',
             payload
@@ -466,7 +464,6 @@ export const updateQuotation = async (
             }
         }
 
-        // Refetch to get updated data
         const quotations = await listQuotations();
         const updated = quotations.find(q => q._id === quotationId || q.orderId === quotationId);
 
@@ -481,13 +478,12 @@ export const updateQuotation = async (
 };
 
 // =============================================================================
-// SEND QUOTE (Admin action)
+// SEND QUOTE (Admin sends quote to customer)
 // =============================================================================
 
 /**
  * Admin sends a quote to customer
- * Updates status to NEGOTIATING and sets quoted prices
- * Backend only accepts: PENDING, NEGOTIATING, ACCEPTED, REJECTED
+ * Changes status to QUOTE_SENT (customer's turn to respond)
  */
 export const sendQuote = async (
     quotationId: string,
@@ -498,14 +494,14 @@ export const sendQuote = async (
         const payload = {
             quotationId: quotationId,
             values: {
-                status: 'NEGOTIATING',  // Backend enum: PENDING, NEGOTIATING, ACCEPTED, REJECTED
+                status: 'QUOTE_SENT',  // ✅ FIXED! Was 'NEGOTIATING' before
                 products: quotedProducts,
+                ...(notes && { notes }),
             },
         };
 
         console.log('Sending quote with payload:', payload);
 
-        // Use PATCH method as per backend API spec
         const response = await apiClient.patch<BackendQuotation | { message: string; quotation: BackendQuotation }>(
             '/orders/quotation/update',
             payload
@@ -521,7 +517,6 @@ export const sendQuote = async (
             }
         }
 
-        // Refetch to get updated data
         const quotations = await listQuotations();
         const updated = quotations.find(q => q._id === quotationId || q.orderId === quotationId);
 
@@ -531,6 +526,223 @@ export const sendQuote = async (
 
     } catch (error: any) {
         console.error('Error sending quote:', error);
+        throw error;
+    }
+};
+
+// =============================================================================
+// ACCEPT COUNTER-OFFER (Admin accepts customer's counter-offer)
+// =============================================================================
+
+/**
+ * Admin accepts customer's counter-offer
+ * Changes status to ACCEPTED (deal done!)
+ * Uses customer's targetPrice as the final price
+ */
+export const acceptCounter = async (
+    quotationId: string,
+    acceptedProducts: { productId: string; quantity: number; targetPrice: number; quotedPrice: number }[]
+): Promise<ApiOrder> => {
+    try {
+        // Set quotedPrice = targetPrice (accepting customer's price)
+        const productsWithAcceptedPrice = acceptedProducts.map(p => ({
+            ...p,
+            quotedPrice: p.targetPrice,  // Accept customer's price
+        }));
+
+        const payload = {
+            quotationId: quotationId,
+            values: {
+                status: 'ACCEPTED',
+                products: productsWithAcceptedPrice,
+            },
+        };
+
+        console.log('Accepting counter-offer with payload:', payload);
+
+        const response = await apiClient.patch<BackendQuotation | { message: string; quotation: BackendQuotation }>(
+            '/orders/quotation/update',
+            payload
+        );
+
+        if (response.data) {
+            const responseData = response.data as any;
+            if (responseData.quotation) {
+                return transformQuotationToFrontend(responseData.quotation);
+            }
+            if (responseData._id) {
+                return transformQuotationToFrontend(responseData as BackendQuotation);
+            }
+        }
+
+        const quotations = await listQuotations();
+        const updated = quotations.find(q => q._id === quotationId || q.orderId === quotationId);
+
+        if (updated) return updated;
+
+        throw new Error('Counter-offer accepted but could not retrieve updated data');
+
+    } catch (error: any) {
+        console.error('Error accepting counter-offer:', error);
+        throw error;
+    }
+};
+
+// =============================================================================
+// REJECT COUNTER-OFFER (Admin rejects customer's counter-offer)
+// =============================================================================
+
+/**
+ * Admin rejects customer's counter-offer
+ * Changes status to REJECTED (negotiation ended)
+ */
+export const rejectCounter = async (
+    quotationId: string,
+    reason?: string
+): Promise<ApiOrder> => {
+    try {
+        const payload = {
+            quotationId: quotationId,
+            values: {
+                status: 'REJECTED',
+                ...(reason && { notes: reason }),
+            },
+        };
+
+        console.log('Rejecting counter-offer with payload:', payload);
+
+        const response = await apiClient.patch<BackendQuotation | { message: string; quotation: BackendQuotation }>(
+            '/orders/quotation/update',
+            payload
+        );
+
+        if (response.data) {
+            const responseData = response.data as any;
+            if (responseData.quotation) {
+                return transformQuotationToFrontend(responseData.quotation);
+            }
+            if (responseData._id) {
+                return transformQuotationToFrontend(responseData as BackendQuotation);
+            }
+        }
+
+        const quotations = await listQuotations();
+        const updated = quotations.find(q => q._id === quotationId || q.orderId === quotationId);
+
+        if (updated) return updated;
+
+        throw new Error('Counter-offer rejected but could not retrieve updated data');
+
+    } catch (error: any) {
+        console.error('Error rejecting counter-offer:', error);
+        throw error;
+    }
+};
+
+// =============================================================================
+// ACCEPT INITIAL REQUEST (Admin accepts customer's initial target price)
+// =============================================================================
+
+/**
+ * Admin accepts customer's initial quote request (their target price)
+ * Changes status to ACCEPTED directly
+ */
+export const acceptQuoteRequest = async (
+    quotationId: string,
+    products: { productId: string; quantity: number; targetPrice: number }[]
+): Promise<ApiOrder> => {
+    try {
+        // Set quotedPrice = targetPrice (accepting customer's price)
+        const productsWithAcceptedPrice = products.map(p => ({
+            ...p,
+            quotedPrice: p.targetPrice,
+        }));
+
+        const payload = {
+            quotationId: quotationId,
+            values: {
+                status: 'ACCEPTED',
+                products: productsWithAcceptedPrice,
+            },
+        };
+
+        console.log('Accepting quote request with payload:', payload);
+
+        const response = await apiClient.patch<BackendQuotation | { message: string; quotation: BackendQuotation }>(
+            '/orders/quotation/update',
+            payload
+        );
+
+        if (response.data) {
+            const responseData = response.data as any;
+            if (responseData.quotation) {
+                return transformQuotationToFrontend(responseData.quotation);
+            }
+            if (responseData._id) {
+                return transformQuotationToFrontend(responseData as BackendQuotation);
+            }
+        }
+
+        const quotations = await listQuotations();
+        const updated = quotations.find(q => q._id === quotationId || q.orderId === quotationId);
+
+        if (updated) return updated;
+
+        throw new Error('Quote request accepted but could not retrieve updated data');
+
+    } catch (error: any) {
+        console.error('Error accepting quote request:', error);
+        throw error;
+    }
+};
+
+// =============================================================================
+// REJECT INITIAL REQUEST (Admin rejects customer's quote request)
+// =============================================================================
+
+/**
+ * Admin rejects customer's initial quote request
+ * Changes status to REJECTED
+ */
+export const rejectQuoteRequest = async (
+    quotationId: string,
+    reason?: string
+): Promise<ApiOrder> => {
+    try {
+        const payload = {
+            quotationId: quotationId,
+            values: {
+                status: 'REJECTED',
+                ...(reason && { notes: reason }),
+            },
+        };
+
+        console.log('Rejecting quote request with payload:', payload);
+
+        const response = await apiClient.patch<BackendQuotation | { message: string; quotation: BackendQuotation }>(
+            '/orders/quotation/update',
+            payload
+        );
+
+        if (response.data) {
+            const responseData = response.data as any;
+            if (responseData.quotation) {
+                return transformQuotationToFrontend(responseData.quotation);
+            }
+            if (responseData._id) {
+                return transformQuotationToFrontend(responseData as BackendQuotation);
+            }
+        }
+
+        const quotations = await listQuotations();
+        const updated = quotations.find(q => q._id === quotationId || q.orderId === quotationId);
+
+        if (updated) return updated;
+
+        throw new Error('Quote request rejected but could not retrieve updated data');
+
+    } catch (error: any) {
+        console.error('Error rejecting quote request:', error);
         throw error;
     }
 };
@@ -569,19 +781,24 @@ export const deleteOrder = async (id: string): Promise<void> => {
 };
 
 /**
- * Check if order is a quotation that needs admin action
- * Admin needs to respond when status is PENDING (quote_requested in UI)
+ * Check if admin needs to respond (quote_requested OR negotiation)
  */
 export const needsAdminAction = (order: ApiOrder): boolean => {
-    return order.isQuotation && ['quote_requested'].includes(order.status);
+    return order.isQuotation && ['quote_requested', 'negotiation'].includes(order.status);
 };
 
 /**
- * Check if customer needs to respond
- * Customer can respond when status is NEGOTIATING (quote_sent in UI)
+ * Check if customer needs to respond (quote_sent)
  */
 export const needsCustomerAction = (order: ApiOrder): boolean => {
     return order.isQuotation && order.status === 'quote_sent';
+};
+
+/**
+ * Check if quotation is in final state
+ */
+export const isQuotationFinal = (order: ApiOrder): boolean => {
+    return ['order_booked', 'rejected', 'cancelled'].includes(order.status);
 };
 
 // =============================================================================
@@ -590,10 +807,10 @@ export const needsCustomerAction = (order: ApiOrder): boolean => {
 
 const ordersApi = {
     // List functions
-    list: listAllOrdersAndQuotations,      // Default: merged list
-    listOrders: listOrders,                 // Orders only
-    listQuotations: listQuotations,         // Quotations only
-    listAll: listAllOrdersAndQuotations,    // Explicit merged
+    list: listAllOrdersAndQuotations,
+    listOrders: listOrders,
+    listQuotations: listQuotations,
+    listAll: listAllOrdersAndQuotations,
 
     // CRUD
     create: createOrder,
@@ -602,12 +819,17 @@ const ordersApi = {
     get: getOrder,
     delete: deleteOrder,
 
-    // Quotation actions
+    // Quotation actions - Admin
     sendQuote: sendQuote,
+    acceptCounter: acceptCounter,
+    rejectCounter: rejectCounter,
+    acceptQuoteRequest: acceptQuoteRequest,
+    rejectQuoteRequest: rejectQuoteRequest,
 
     // Helpers
     needsAdminAction,
     needsCustomerAction,
+    isQuotationFinal,
 };
 
 export default ordersApi;

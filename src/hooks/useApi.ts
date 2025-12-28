@@ -1,5 +1,5 @@
 // =============================================================================
-// REACT QUERY HOOKS - For All Endpoints
+// REACT QUERY HOOKS - For All Endpoints (FIXED)
 // =============================================================================
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -109,7 +109,6 @@ export function useProducts() {
     });
 }
 
-// Hook to get single product by ID (from the products list)
 export function useProduct(id: string | undefined) {
     const { data: products, isLoading, error } = useProducts();
 
@@ -154,11 +153,10 @@ export function useCreateProduct() {
 export function useOrders() {
     return useQuery({
         queryKey: queryKeys.orders,
-        queryFn: () => ordersApi.listAll(),  // Uses merged list (orders + quotations)
+        queryFn: () => ordersApi.listAll(),
     });
 }
 
-// Hook for orders only (legacy)
 export function useOrdersOnly() {
     return useQuery({
         queryKey: ['orders-only'],
@@ -166,7 +164,6 @@ export function useOrdersOnly() {
     });
 }
 
-// Hook for quotations only
 export function useQuotationsOnly() {
     return useQuery({
         queryKey: ['quotations-only'],
@@ -250,6 +247,10 @@ export function useUpdateQuotation() {
     });
 }
 
+/**
+ * Send Quote - Admin sends quoted prices to customer
+ * Sets status to QUOTE_SENT (customer's turn)
+ */
 export function useSendQuote() {
     const queryClient = useQueryClient();
     const { toast } = useToast();
@@ -264,16 +265,148 @@ export function useSendQuote() {
             products: { productId: string; quantity: number; targetPrice: number; quotedPrice: number }[];
             notes?: string;
         }) => ordersApi.sendQuote(quotationId, products, notes),
-        onSuccess: (data) => {
+        onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: queryKeys.orders });
             toast({
                 title: 'Quote Sent! ✅',
-                description: `Quote has been sent to the customer`,
+                description: 'Quote has been sent to the customer. Waiting for their response.',
             });
         },
         onError: (error: Error) => {
             toast({
                 title: 'Failed to Send Quote',
+                description: error.message,
+                variant: 'destructive',
+            });
+        },
+    });
+}
+
+/**
+ * Accept Counter-Offer - Admin accepts customer's counter-offer
+ * Sets status to ACCEPTED (deal done!)
+ */
+export function useAcceptCounter() {
+    const queryClient = useQueryClient();
+    const { toast } = useToast();
+
+    return useMutation({
+        mutationFn: ({
+                         quotationId,
+                         products
+                     }: {
+            quotationId: string;
+            products: { productId: string; quantity: number; targetPrice: number; quotedPrice: number }[];
+        }) => ordersApi.acceptCounter(quotationId, products),
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: queryKeys.orders });
+            toast({
+                title: 'Counter-Offer Accepted! 🎉',
+                description: 'Order has been confirmed at the negotiated price.',
+            });
+        },
+        onError: (error: Error) => {
+            toast({
+                title: 'Failed to Accept Counter-Offer',
+                description: error.message,
+                variant: 'destructive',
+            });
+        },
+    });
+}
+
+/**
+ * Reject Counter-Offer - Admin rejects customer's counter-offer
+ * Sets status to REJECTED (negotiation ended)
+ */
+export function useRejectCounter() {
+    const queryClient = useQueryClient();
+    const { toast } = useToast();
+
+    return useMutation({
+        mutationFn: ({
+                         quotationId,
+                         reason
+                     }: {
+            quotationId: string;
+            reason?: string;
+        }) => ordersApi.rejectCounter(quotationId, reason),
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: queryKeys.orders });
+            toast({
+                title: 'Counter-Offer Rejected',
+                description: 'The negotiation has been ended.',
+            });
+        },
+        onError: (error: Error) => {
+            toast({
+                title: 'Failed to Reject Counter-Offer',
+                description: error.message,
+                variant: 'destructive',
+            });
+        },
+    });
+}
+
+/**
+ * Accept Quote Request - Admin accepts customer's initial target price
+ * Sets status to ACCEPTED directly
+ */
+export function useAcceptQuoteRequest() {
+    const queryClient = useQueryClient();
+    const { toast } = useToast();
+
+    return useMutation({
+        mutationFn: ({
+                         quotationId,
+                         products
+                     }: {
+            quotationId: string;
+            products: { productId: string; quantity: number; targetPrice: number }[];
+        }) => ordersApi.acceptQuoteRequest(quotationId, products),
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: queryKeys.orders });
+            toast({
+                title: 'Quote Request Accepted! 🎉',
+                description: 'Order has been confirmed at customer\'s requested price.',
+            });
+        },
+        onError: (error: Error) => {
+            toast({
+                title: 'Failed to Accept Quote Request',
+                description: error.message,
+                variant: 'destructive',
+            });
+        },
+    });
+}
+
+/**
+ * Reject Quote Request - Admin rejects customer's initial request
+ * Sets status to REJECTED
+ */
+export function useRejectQuoteRequest() {
+    const queryClient = useQueryClient();
+    const { toast } = useToast();
+
+    return useMutation({
+        mutationFn: ({
+                         quotationId,
+                         reason
+                     }: {
+            quotationId: string;
+            reason?: string;
+        }) => ordersApi.rejectQuoteRequest(quotationId, reason),
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: queryKeys.orders });
+            toast({
+                title: 'Quote Request Rejected',
+                description: 'The quote request has been declined.',
+            });
+        },
+        onError: (error: Error) => {
+            toast({
+                title: 'Failed to Reject Quote Request',
                 description: error.message,
                 variant: 'destructive',
             });

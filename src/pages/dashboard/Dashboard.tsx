@@ -57,12 +57,12 @@ const mapApiStatus = (status: string): string => {
 const Dashboard = () => {
   const navigate = useNavigate();
 
-  // ✅ Fetch data from API (removed useCustomers - not available on EC2)
+  // ✅ Fetch data from API
   const { data: apiOrders, isLoading: ordersLoading, error: ordersError } = useOrders();
   const { data: apiProducts, isLoading: productsLoading } = useProducts();
   const { data: apiInventory, isLoading: inventoryLoading } = useInventory();
 
-  const isLoading = ordersLoading || productsLoading || inventoryLoading;
+  const isLoading = ordersLoading || productsLoading;
 
   // ✅ Create product lookup for names
   const productLookup: Record<string, { name: string; sku: string }> = useMemo(() => {
@@ -77,9 +77,9 @@ const Dashboard = () => {
     return lookup;
   }, [apiProducts]);
 
-  // ✅ Calculate stats from API data
+  // ✅ Calculate stats from API data - FIXED: Uses Products for stock data
   const stats = useMemo(() => {
-    if (!apiOrders || !apiInventory || !apiProducts) {
+    if (!apiOrders || !apiProducts) {
       return {
         totalRevenue: 0,
         totalOrders: 0,
@@ -115,13 +115,19 @@ const Dashboard = () => {
       return orderDate >= oneWeekAgo;
     }).length;
 
-    // Low stock items (stock <= reorderLevel and stock > 0)
-    const lowStockCount = apiInventory.filter((inv: any) =>
-        inv.stock > 0 && inv.stock <= inv.reorderLevel
-    ).length;
+    // ✅ FIXED: Use Products data for stock calculations (not Inventory)
+    // Low stock items (stockQuantity <= minStockLevel and stockQuantity > 0)
+    const lowStockCount = (apiProducts as any[]).filter((product: any) => {
+      const stock = product.stockQuantity ?? 0;
+      const minLevel = product.minStockLevel ?? 10;
+      return stock > 0 && stock <= minLevel;
+    }).length;
 
-    // Out of stock (stock = 0)
-    const outOfStockCount = apiInventory.filter((inv: any) => inv.stock === 0).length;
+    // Out of stock (stockQuantity = 0 or undefined with minStockLevel set)
+    const outOfStockCount = (apiProducts as any[]).filter((product: any) => {
+      const stock = product.stockQuantity ?? 0;
+      return stock === 0;
+    }).length;
 
     return {
       totalRevenue,
@@ -133,7 +139,7 @@ const Dashboard = () => {
       lowStockCount,
       outOfStockCount,
     };
-  }, [apiOrders, apiInventory, apiProducts]);
+  }, [apiOrders, apiProducts]);
 
   // ✅ Orders by status for pie chart
   const orderStatusData = useMemo(() => {
@@ -192,25 +198,27 @@ const Dashboard = () => {
     return months;
   }, [apiOrders]);
 
-  // ✅ Low stock items from API
+  // ✅ FIXED: Low stock items from Products API (not Inventory)
   const lowStockItems = useMemo(() => {
-    if (!apiInventory || !apiProducts) return [];
+    if (!apiProducts) return [];
 
-    return apiInventory
-        .filter((inv: any) => inv.stock <= inv.reorderLevel)
+    return (apiProducts as any[])
+        .filter((product: any) => {
+          const stock = product.stockQuantity ?? 0;
+          const minLevel = product.minStockLevel ?? 10;
+          return stock <= minLevel;
+        })
+        .sort((a: any, b: any) => (a.stockQuantity ?? 0) - (b.stockQuantity ?? 0)) // Most critical first
         .slice(0, 5)
-        .map((inv: any) => {
-          const product = (apiProducts as any[]).find((p) => p._id === inv.product);
-          return {
-            id: inv._id,
-            sku: product?.sku || "N/A",
-            name: product?.name || "Unknown Product",
-            qty: inv.stock,
-            reorderLevel: inv.reorderLevel,
-            status: inv.stock === 0 ? "critical" : "low",
-          };
-        });
-  }, [apiInventory, apiProducts]);
+        .map((product: any) => ({
+          id: product._id,
+          sku: product.sku || "N/A",
+          name: product.name || "Unknown Product",
+          qty: product.stockQuantity ?? 0,
+          minLevel: product.minStockLevel ?? 10,
+          status: (product.stockQuantity ?? 0) === 0 ? "critical" : "low",
+        }));
+  }, [apiProducts]);
 
   // ✅ Recent orders from API with product names
   const recentOrders = useMemo(() => {
@@ -601,7 +609,7 @@ const Dashboard = () => {
                 </CardContent>
               </Card>
 
-              {/* Inventory Summary */}
+              {/* Inventory Summary - FIXED: Uses Products data */}
               <Card className="border-border/50">
                 <CardHeader className="flex flex-row items-center justify-between pb-2">
                   <CardTitle className="text-base">Inventory Summary</CardTitle>
@@ -619,7 +627,11 @@ const Dashboard = () => {
                         <span className="text-sm">In Stock</span>
                       </div>
                       <span className="font-semibold">
-                        {apiInventory ? apiInventory.filter((inv: any) => inv.stock > inv.reorderLevel).length : 0}
+                        {apiProducts ? (apiProducts as any[]).filter((p: any) => {
+                          const stock = p.stockQuantity ?? 0;
+                          const minLevel = p.minStockLevel ?? 10;
+                          return stock > minLevel;
+                        }).length : 0}
                       </span>
                     </div>
                     <div className="flex items-center justify-between">

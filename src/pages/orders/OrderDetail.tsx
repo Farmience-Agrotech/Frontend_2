@@ -1,5 +1,5 @@
 // =============================================================================
-// Admin OrderDetail.tsx - Order/Quotation Detail Page with Send Quote
+// Admin OrderDetail.tsx - Order/Quotation Detail Page with Full Negotiation
 // =============================================================================
 
 import { useState, useMemo, useRef, useEffect } from 'react';
@@ -55,12 +55,13 @@ import {
   AlertCircle,
   Download,
   Printer,
-  Plus,
   Eye,
+  Check,
+  XCircle,
+  ArrowRightLeft,
 } from 'lucide-react';
 
 // Invoice Components
-import { InvoiceGeneratorDialog } from '@/components/orders/InvoiceGeneratorDialog';
 import { InvoiceViewDialog } from '@/components/invoices/InvoiceViewDialog';
 import { GeneratedInvoice, InvoiceType } from '@/types/invoice';
 import { useReactToPrint } from 'react-to-print';
@@ -72,16 +73,28 @@ import { usePermissions } from '@/hooks/usePermissions';
 import { useToast } from '@/hooks/use-toast';
 
 // Hooks
-import { useOrders, useUpdateOrder, useUpdateQuotation, useProducts, useCustomers, useSendQuote } from '@/hooks/useApi';
+import {
+  useOrders,
+  useUpdateOrder,
+  useUpdateQuotation,
+  useProducts,
+  useCustomers,
+  useSendQuote,
+  useAcceptCounter,
+  useRejectCounter,
+  useAcceptQuoteRequest,
+  useRejectQuoteRequest,
+} from '@/hooks/useApi';
 import type { ApiCustomer } from '@/api/customers.api';
 import type { ApiOrder } from '@/api/orders.api';
 
 // =============================================================================
-// STATUS MAPPING
+// STATUS MAPPING - FIXED!
 // =============================================================================
 
 const mapApiStatusToFrontend = (apiStatus: string): OrderStatus => {
   const statusMap: Record<string, OrderStatus> = {
+    // Frontend lowercase statuses
     'quote_requested': 'quote_requested',
     'quote_sent': 'quote_sent',
     'negotiation': 'negotiation',
@@ -99,14 +112,14 @@ const mapApiStatusToFrontend = (apiStatus: string): OrderStatus => {
     'returned': 'returned',
     'refunded': 'refunded',
     'on_hold': 'on_hold',
-    // Backend quotation statuses (4 enum values)
-    'PENDING': 'quote_requested',
-    'NEGOTIATING': 'quote_sent',      // Admin sent quote
-    'ACCEPTED': 'order_booked',
-    'REJECTED': 'rejected',
-    // Uppercase mappings (legacy)
+    // Backend quotation statuses (FIXED MAPPING!)
+    'PENDING': 'quote_requested',      // Admin needs to respond
+    'QUOTE_SENT': 'quote_sent',        // Customer needs to respond
+    'NEGOTIATING': 'negotiation',      // Admin needs to respond to counter
+    'ACCEPTED': 'order_booked',        // Deal done!
+    'REJECTED': 'rejected',            // No deal
+    // Uppercase variants
     'QUOTE_REQUESTED': 'quote_requested',
-    'QUOTE_SENT': 'quote_sent',
     'NEGOTIATION': 'negotiation',
     'ORDER_BOOKED': 'order_booked',
     'CONFIRMED': 'confirmed',
@@ -135,6 +148,10 @@ export default function OrderDetail() {
   const updateOrderMutation = useUpdateOrder();
   const updateQuotationMutation = useUpdateQuotation();
   const sendQuoteMutation = useSendQuote();
+  const acceptCounterMutation = useAcceptCounter();
+  const rejectCounterMutation = useRejectCounter();
+  const acceptQuoteRequestMutation = useAcceptQuoteRequest();
+  const rejectQuoteRequestMutation = useRejectQuoteRequest();
 
   // State
   const [showEditDialog, setShowEditDialog] = useState(false);
@@ -142,6 +159,11 @@ export default function OrderDetail() {
   const [showSendQuoteDialog, setShowSendQuoteDialog] = useState(false);
   const [quotedPrices, setQuotedPrices] = useState<Record<string, number>>({});
   const [quoteNotes, setQuoteNotes] = useState('');
+
+  // Confirmation dialogs
+  const [showAcceptDialog, setShowAcceptDialog] = useState(false);
+  const [showRejectDialog, setShowRejectDialog] = useState(false);
+  const [rejectReason, setRejectReason] = useState('');
 
   // Edit form state
   const [editFormData, setEditFormData] = useState({
@@ -151,10 +173,8 @@ export default function OrderDetail() {
     discount: 0,
   });
 
-  // Invoice state
+  // Invoice state - Auto-generated based on timeline
   const [invoices, setInvoices] = useState<GeneratedInvoice[]>([]);
-  const [showInvoiceDialog, setShowInvoiceDialog] = useState(false);
-  const [invoiceType, setInvoiceType] = useState<InvoiceType>('proforma');
   const [selectedInvoice, setSelectedInvoice] = useState<GeneratedInvoice | null>(null);
   const [viewInvoiceDialogOpen, setViewInvoiceDialogOpen] = useState(false);
   const printRef = useRef<HTMLDivElement>(null);
@@ -165,13 +185,13 @@ export default function OrderDetail() {
     documentTitle: selectedInvoice ? `Invoice-${selectedInvoice.invoiceNumber}` : 'Invoice',
   });
 
-  // Track if invoices have been auto-generated (to prevent re-generation)
+  // Track if invoices have been auto-generated
   const [invoicesGenerated, setInvoicesGenerated] = useState<{ proforma: boolean; tax: boolean }>({
     proforma: false,
     tax: false,
   });
 
-  // Product lookup - includes tax rate from inventory
+  // Product lookup
   const productLookup = useMemo(() => {
     if (!apiProducts) return {};
     const lookup: Record<string, { name: string; sku: string; price: number; taxRate: number }> = {};
@@ -180,7 +200,7 @@ export default function OrderDetail() {
         name: product.name,
         sku: product.sku || '',
         price: product.minPrice || product.price || 0,
-        taxRate: product.taxRate || product.gstRate || product.tax || 18, // Get tax rate from product, default 18%
+        taxRate: product.taxRate || product.gstRate || product.tax || 18,
       };
     });
     return lookup;
@@ -210,10 +230,9 @@ export default function OrderDetail() {
   }, [apiOrder, customerMap]);
 
   // =============================================================================
-  // AUTO-GENERATE INVOICES BASED ON STATUS
+  // AUTO-GENERATE INVOICES
   // =============================================================================
 
-  // Function to create an invoice object
   const createInvoiceObject = (type: InvoiceType): GeneratedInvoice | null => {
     if (!apiOrder || !linkedCustomer) return null;
     if (!apiOrder.items || apiOrder.items.length === 0) return null;
@@ -221,24 +240,21 @@ export default function OrderDetail() {
     try {
       const now = new Date();
       const dueDate = new Date(now);
-      dueDate.setDate(dueDate.getDate() + 30); // 30 days payment term
+      dueDate.setDate(dueDate.getDate() + 30);
 
       const orderIdShort = apiOrder._id?.slice(-8)?.toUpperCase() || 'UNKNOWN';
       const invoicePrefix = type === 'proforma' ? 'PI' : 'TI';
       const invoiceNumber = `${invoicePrefix}-${apiOrder.orderNumber || orderIdShort}`;
 
-      // Calculate totals
       const subtotal = (apiOrder.items || []).reduce((sum, item) => {
         const price = item.quotedPrice || item.targetPrice || item.price || 0;
         return sum + ((item.quantity || 0) * price);
       }, 0);
 
-      // Calculate tax based on individual product tax rates from inventory
       const taxAmount = (apiOrder.items || []).reduce((sum, item) => {
         const product = productLookup[item.productId];
         const price = item.quotedPrice || item.targetPrice || item.price || 0;
         const lineSubtotal = (item.quantity || 0) * price;
-        // Get tax rate from product in inventory, default 18%
         const taxPercent = product?.taxRate || 18;
         return sum + (lineSubtotal * (taxPercent / 100));
       }, 0);
@@ -247,7 +263,6 @@ export default function OrderDetail() {
       const discount = apiOrder.discount || 0;
       const grandTotal = subtotal + taxAmount + shippingCost - discount;
 
-      // Determine if IGST or CGST/SGST based on state
       const sellerState = 'Maharashtra';
       const buyerState = linkedCustomer.billingAddress?.state || 'Maharashtra';
       const isInterState = sellerState !== buyerState;
@@ -295,7 +310,6 @@ export default function OrderDetail() {
           const qty = item.quantity || 1;
           const taxableValue = qty * price;
           const productId = item.productId || '';
-          // Get tax rate from product in inventory, default 18%
           const itemTaxRate = product?.taxRate || 18;
           return {
             id: `item-${index}`,
@@ -340,17 +354,13 @@ export default function OrderDetail() {
     }
   };
 
-  // Get frontend status for auto-generation check
   const frontendStatusForInvoice = apiOrder ? mapApiStatusToFrontend(apiOrder.status) : null;
 
-  // Auto-generate invoices based on order status
   useEffect(() => {
-    // Safety checks
     if (!apiOrder || !linkedCustomer || !frontendStatusForInvoice) return;
-    if (Object.keys(productLookup).length === 0) return; // Wait for products to load
+    if (Object.keys(productLookup).length === 0) return;
 
     try {
-      // Auto-generate Proforma Invoice when status is order_booked
       if (frontendStatusForInvoice === 'order_booked' && !invoicesGenerated.proforma) {
         const proformaInvoice = createInvoiceObject('proforma');
         if (proformaInvoice) {
@@ -359,9 +369,7 @@ export default function OrderDetail() {
         }
       }
 
-      // Auto-generate Tax Invoice when status is shipped or delivered
       if (['shipped', 'delivered', 'completed'].includes(frontendStatusForInvoice) && !invoicesGenerated.tax) {
-        // Also generate proforma if not already generated
         if (!invoicesGenerated.proforma) {
           const proformaInvoice = createInvoiceObject('proforma');
           if (proformaInvoice) {
@@ -381,18 +389,21 @@ export default function OrderDetail() {
     }
   }, [apiOrder?._id, linkedCustomer?._id, frontendStatusForInvoice, Object.keys(productLookup).length]);
 
-  // Initialize quoted prices when dialog opens
+  // Initialize quoted prices
   const initializeQuotedPrices = () => {
     if (!apiOrder) return;
     const prices: Record<string, number> = {};
     apiOrder.items.forEach(item => {
-      // Use existing quotedPrice, or targetPrice, or current price
       prices[item.productId] = item.quotedPrice || item.targetPrice || item.price || 0;
     });
     setQuotedPrices(prices);
   };
 
-  // Handle Send Quote
+  // =============================================================================
+  // ACTION HANDLERS
+  // =============================================================================
+
+  // Send Quote (sets status to QUOTE_SENT)
   const handleSendQuote = async () => {
     if (!apiOrder) return;
 
@@ -419,7 +430,69 @@ export default function OrderDetail() {
     }
   };
 
-  // Initialize edit form when dialog opens
+  // Accept (customer's price or counter-offer)
+  const handleAccept = async () => {
+    if (!apiOrder) return;
+
+    try {
+      const products = apiOrder.items.map(item => ({
+        productId: item.productId,
+        quantity: item.quantity,
+        targetPrice: item.targetPrice || item.price,
+        quotedPrice: item.quotedPrice || item.targetPrice || item.price,
+      }));
+
+      if (frontendStatus === 'quote_requested') {
+        // Accept initial quote request
+        await acceptQuoteRequestMutation.mutateAsync({
+          quotationId: apiOrder._id,
+          products: products.map(p => ({
+            productId: p.productId,
+            quantity: p.quantity,
+            targetPrice: p.targetPrice,
+          })),
+        });
+      } else {
+        // Accept counter-offer
+        await acceptCounterMutation.mutateAsync({
+          quotationId: apiOrder._id,
+          products,
+        });
+      }
+
+      setShowAcceptDialog(false);
+      refetch();
+    } catch (error) {
+      console.error('Failed to accept:', error);
+    }
+  };
+
+  // Reject (customer's price or counter-offer)
+  const handleReject = async () => {
+    if (!apiOrder) return;
+
+    try {
+      if (frontendStatus === 'quote_requested') {
+        await rejectQuoteRequestMutation.mutateAsync({
+          quotationId: apiOrder._id,
+          reason: rejectReason || undefined,
+        });
+      } else {
+        await rejectCounterMutation.mutateAsync({
+          quotationId: apiOrder._id,
+          reason: rejectReason || undefined,
+        });
+      }
+
+      setShowRejectDialog(false);
+      setRejectReason('');
+      refetch();
+    } catch (error) {
+      console.error('Failed to reject:', error);
+    }
+  };
+
+  // Initialize edit form
   const initializeEditForm = () => {
     if (!apiOrder) return;
     setEditFormData({
@@ -430,13 +503,12 @@ export default function OrderDetail() {
     });
   };
 
-  // Handle edit order save
+  // Handle edit save
   const handleEditSave = async () => {
     if (!apiOrder) return;
 
     try {
       if (apiOrder.isQuotation) {
-        // For Quotations: use updateQuotation endpoint with quotationId
         await updateQuotationMutation.mutateAsync({
           quotationId: apiOrder._id,
           data: {
@@ -446,11 +518,9 @@ export default function OrderDetail() {
           },
         });
       } else {
-        // For Orders: use updateOrder endpoint with orderId
         await updateOrderMutation.mutateAsync({
           id: apiOrder._id,
           data: {
-            orderId: apiOrder.orderId || apiOrder.orderNumber,
             notes: editFormData.notes,
             shippingCost: editFormData.shippingCost,
             discount: editFormData.discount,
@@ -460,92 +530,30 @@ export default function OrderDetail() {
 
       setIsEditMode(false);
       refetch();
-      toast({
-        title: apiOrder.isQuotation ? 'Quotation Updated' : 'Order Updated',
-        description: 'Details have been saved successfully.',
-      });
     } catch (error) {
-      console.error('Failed to update:', error);
-      toast({
-        title: 'Error',
-        description: 'Failed to update. Please try again.',
-        variant: 'destructive',
-      });
+      console.error('Failed to save:', error);
     }
   };
 
-  // Open invoice generator dialog
-  const handleGenerateInvoice = (type: InvoiceType) => {
-    setInvoiceType(type);
-    setShowInvoiceDialog(true);
-  };
-
-  // Save generated invoice
-  const handleInvoiceSaved = (invoice: GeneratedInvoice) => {
-    setInvoices(prev => [...prev, invoice]);
-    setShowInvoiceDialog(false);
-    toast({
-      title: 'Invoice Created',
-      description: `${invoice.type === 'proforma' ? 'Proforma Invoice' : 'Tax Invoice'} ${invoice.invoiceNumber} has been generated.`,
-    });
-  };
-
-  // View invoice
+  // Invoice handlers
   const handleViewInvoice = (invoice: GeneratedInvoice) => {
     setSelectedInvoice(invoice);
     setViewInvoiceDialogOpen(true);
   };
 
-  // Download invoice as PDF
-  const handleDownloadInvoicePDF = (invoice: GeneratedInvoice) => {
-    setSelectedInvoice(invoice);
-    setViewInvoiceDialogOpen(true);
-    setTimeout(() => {
-      if (printRef.current) {
-        const element = printRef.current;
-        const opt = {
-          margin: 10,
-          filename: `${invoice.invoiceNumber}.pdf`,
-          image: { type: 'jpeg', quality: 0.98 },
-          html2canvas: { scale: 2, useCORS: true },
-          jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
-        };
-        html2pdf().set(opt).from(element).save();
-      }
-    }, 500);
-  };
-
-  // Print invoice
-  const handlePrintInvoice = (invoice: GeneratedInvoice) => {
-    setSelectedInvoice(invoice);
-    setViewInvoiceDialogOpen(true);
-    setTimeout(() => {
-      handlePrint();
-    }, 500);
-  };
-
-  // Send invoice to customer
-  const handleSendInvoice = (invoice: GeneratedInvoice) => {
-    toast({
-      title: 'Invoice Sent',
-      description: `Invoice ${invoice.invoiceNumber} has been sent to customer`,
-    });
-  };
-
-  // Dialog handlers for InvoiceViewDialog
   const handleDialogPrint = () => {
     handlePrint();
   };
 
   const handleDialogDownload = () => {
-    if (selectedInvoice && printRef.current) {
+    if (printRef.current && selectedInvoice) {
       const element = printRef.current;
       const opt = {
-        margin: 10,
+        margin: 0,
         filename: `${selectedInvoice.invoiceNumber}.pdf`,
         image: { type: 'jpeg', quality: 0.98 },
-        html2canvas: { scale: 2, useCORS: true },
-        jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
+        html2canvas: { scale: 2 },
+        jsPDF: { unit: 'in', format: 'a4', orientation: 'portrait' }
       };
       html2pdf().set(opt).from(element).save();
     }
@@ -560,7 +568,7 @@ export default function OrderDetail() {
     }
   };
 
-  // Format currency helper
+  // Format currency
   const formatCurrency = (amount: number): string => {
     return new Intl.NumberFormat('en-IN', {
       style: 'currency',
@@ -620,13 +628,16 @@ export default function OrderDetail() {
   const statusConfig = ORDER_STATUS_CONFIG[frontendStatus] || ORDER_STATUS_CONFIG['processing'];
   const { subtotal, quotedTotal } = calculateTotals();
 
-  // Check if this needs admin to send quote
-  const needsQuoteResponse = apiOrder.isQuotation &&
-      ['quote_requested', 'negotiation'].includes(frontendStatus);
+  // Determine what actions are available
+  const isQuotation = apiOrder.isQuotation;
+  const needsQuoteResponse = isQuotation && frontendStatus === 'quote_requested';
+  const needsCounterResponse = isQuotation && frontendStatus === 'negotiation';
+  const needsAdminAction = needsQuoteResponse || needsCounterResponse;
+  const awaitingCustomer = isQuotation && frontendStatus === 'quote_sent';
+  const isFinal = ['order_booked', 'rejected', 'cancelled'].includes(frontendStatus);
 
-  // Get shipping address with fallback to customer's delivery address
+  // Get addresses
   const getShippingAddress = () => {
-    // 1. First try order's shipping address
     if (apiOrder.shippingAddress?.streetAddress || apiOrder.shippingAddress?.city) {
       return {
         street: apiOrder.shippingAddress.streetAddress || '',
@@ -637,7 +648,6 @@ export default function OrderDetail() {
       };
     }
 
-    // 2. Fallback to customer's first delivery address
     const customerDeliveryAddr = linkedCustomer?.deliveryAddresses?.[0];
     if (customerDeliveryAddr && (customerDeliveryAddr.street || customerDeliveryAddr.streetAddress || customerDeliveryAddr.city)) {
       return {
@@ -649,7 +659,6 @@ export default function OrderDetail() {
       };
     }
 
-    // 3. Fallback to customer's billing address
     const customerBillingAddr = linkedCustomer?.billingAddress;
     if (customerBillingAddr && (customerBillingAddr.street || customerBillingAddr.streetAddress || customerBillingAddr.city)) {
       return {
@@ -661,17 +670,9 @@ export default function OrderDetail() {
       };
     }
 
-    // 4. Return empty address
-    return {
-      street: '',
-      city: '',
-      state: '',
-      pincode: '',
-      country: 'India',
-    };
+    return { street: '', city: '', state: '', pincode: '', country: 'India' };
   };
 
-  // Get billing address from customer
   const getBillingAddress = () => {
     const customerBillingAddr = linkedCustomer?.billingAddress;
     if (customerBillingAddr && (customerBillingAddr.street || customerBillingAddr.streetAddress || customerBillingAddr.city)) {
@@ -684,16 +685,10 @@ export default function OrderDetail() {
       };
     }
 
-    return {
-      street: '',
-      city: '',
-      state: '',
-      pincode: '',
-      country: 'India',
-    };
+    return { street: '', city: '', state: '', pincode: '', country: 'India' };
   };
 
-  // Build order object for components
+  // Build order object
   const order: Order = {
     id: apiOrder._id,
     _id: apiOrder._id,
@@ -737,6 +732,20 @@ export default function OrderDetail() {
     priority: apiOrder.priority || 'medium',
   };
 
+  // Calculate customer target vs quoted
+  const customerTargetTotal = apiOrder.items.reduce((sum, item) => {
+    return sum + (item.quantity * (item.targetPrice || item.price || 0));
+  }, 0);
+
+  const companyQuotedTotal = apiOrder.items.reduce((sum, item) => {
+    return sum + (item.quantity * (item.quotedPrice || item.targetPrice || item.price || 0));
+  }, 0);
+
+  const priceDifference = customerTargetTotal - companyQuotedTotal;
+  const priceDifferencePercent = companyQuotedTotal > 0
+      ? ((priceDifference / companyQuotedTotal) * 100).toFixed(1)
+      : 0;
+
   return (
       <DashboardLayout>
         <div className="space-y-6">
@@ -750,7 +759,7 @@ export default function OrderDetail() {
               <div>
                 <div className="flex items-center gap-3">
                   <h1 className="text-2xl font-bold">{order.orderNumber}</h1>
-                  {apiOrder.isQuotation && (
+                  {isQuotation && (
                       <Badge variant="outline" className="text-purple-600 border-purple-300">
                         Quotation
                       </Badge>
@@ -766,22 +775,8 @@ export default function OrderDetail() {
             </div>
 
             <div className="flex items-center gap-2">
-              {/* Send Quote Button - Only for quotations needing response */}
-              {needsQuoteResponse && (
-                  <Button
-                      onClick={() => {
-                        initializeQuotedPrices();
-                        setShowSendQuoteDialog(true);
-                      }}
-                      className="bg-blue-600 hover:bg-blue-700"
-                  >
-                    <Send className="h-4 w-4 mr-2" />
-                    Send Quote
-                  </Button>
-              )}
-
-              {/* Edit Order Button - Toggle inline edit mode */}
-              {canEdit && !isEditMode && (
+              {/* Edit Order Button */}
+              {canEdit && !isEditMode && !needsAdminAction && (
                   <Button
                       variant="outline"
                       onClick={() => {
@@ -820,24 +815,225 @@ export default function OrderDetail() {
             </div>
           </div>
 
-          {/* Alert for Quotation Action Required */}
+          {/* =================================================================== */}
+          {/* ACTION REQUIRED ALERTS */}
+          {/* =================================================================== */}
+
+          {/* New Quote Request - Admin can Accept, Reject, or Send Quote */}
           {needsQuoteResponse && (
               <Card className="border-amber-200 bg-amber-50">
-                <CardContent className="p-4">
-                  <div className="flex items-start gap-3">
-                    <AlertCircle className="h-5 w-5 text-amber-600 mt-0.5" />
-                    <div>
-                      <h3 className="font-semibold text-amber-800">
-                        {frontendStatus === 'quote_requested'
-                            ? 'Quote Request - Action Required'
-                            : 'Counter-offer Received - Action Required'
-                        }
+                <CardContent className="p-6">
+                  <div className="flex items-start gap-4">
+                    <Clock className="h-8 w-8 text-amber-600 mt-1" />
+                    <div className="flex-1">
+                      <h3 className="font-semibold text-lg text-amber-800">
+                        New Quote Request - Action Required
                       </h3>
-                      <p className="text-sm text-amber-700 mt-1">
-                        {frontendStatus === 'quote_requested'
-                            ? 'Customer is waiting for your quote. Review their target prices and send your quoted prices.'
-                            : 'Customer has submitted a counter-offer. Review and send an updated quote.'
-                        }
+                      <p className="text-amber-700 mt-1">
+                        Customer is requesting a quote. Review their target prices and choose how to respond:
+                      </p>
+
+                      {/* Price Summary */}
+                      <div className="mt-4 p-4 bg-white rounded-lg border border-amber-200">
+                        <div className="flex justify-between items-center">
+                          <span className="text-muted-foreground">Customer's Target Total:</span>
+                          <span className="text-xl font-bold">₹{customerTargetTotal.toLocaleString()}</span>
+                        </div>
+                      </div>
+
+                      {/* Action Buttons */}
+                      <div className="flex flex-wrap gap-3 mt-4">
+                        <Button
+                            onClick={() => setShowAcceptDialog(true)}
+                            className="bg-green-600 hover:bg-green-700"
+                        >
+                          <Check className="h-4 w-4 mr-2" />
+                          Accept Price (₹{customerTargetTotal.toLocaleString()})
+                        </Button>
+                        <Button
+                            variant="outline"
+                            onClick={() => {
+                              initializeQuotedPrices();
+                              setShowSendQuoteDialog(true);
+                            }}
+                        >
+                          <Send className="h-4 w-4 mr-2" />
+                          Send Different Quote
+                        </Button>
+                        <Button
+                            variant="destructive"
+                            onClick={() => setShowRejectDialog(true)}
+                        >
+                          <XCircle className="h-4 w-4 mr-2" />
+                          Reject Request
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+          )}
+
+          {/* Counter-Offer Received - Admin can Accept, Reject, or Counter */}
+          {needsCounterResponse && (
+              <Card className="border-purple-200 bg-purple-50">
+                <CardContent className="p-6">
+                  <div className="flex items-start gap-4">
+                    <ArrowRightLeft className="h-8 w-8 text-purple-600 mt-1" />
+                    <div className="flex-1">
+                      <h3 className="font-semibold text-lg text-purple-800">
+                        Customer Counter-Offer Received - Action Required
+                      </h3>
+                      <p className="text-purple-700 mt-1">
+                        Customer has submitted a counter-offer. Review the comparison below and respond:
+                      </p>
+
+                      {/* Price Comparison Table */}
+                      <div className="mt-4 bg-white rounded-lg border border-purple-200 overflow-hidden">
+                        <Table>
+                          <TableHeader>
+                            <TableRow className="bg-purple-100">
+                              <TableHead>Product</TableHead>
+                              <TableHead className="text-center">Qty</TableHead>
+                              <TableHead className="text-right">Your Quote</TableHead>
+                              <TableHead className="text-right">Customer Wants</TableHead>
+                              <TableHead className="text-right">Difference</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {apiOrder.items.map((item, index) => {
+                              const product = productLookup[item.productId];
+                              const yourPrice = item.quotedPrice || 0;
+                              const customerPrice = item.targetPrice || 0;
+                              const diff = yourPrice - customerPrice;
+                              const diffPercent = yourPrice > 0 ? ((diff / yourPrice) * 100).toFixed(1) : 0;
+
+                              return (
+                                  <TableRow key={index}>
+                                    <TableCell className="font-medium">
+                                      {product?.name || `Product ${item.productId.slice(-6)}`}
+                                    </TableCell>
+                                    <TableCell className="text-center">{item.quantity}</TableCell>
+                                    <TableCell className="text-right">₹{yourPrice.toLocaleString()}</TableCell>
+                                    <TableCell className="text-right">₹{customerPrice.toLocaleString()}</TableCell>
+                                    <TableCell className="text-right">
+                                <span className={diff > 0 ? 'text-red-600' : 'text-green-600'}>
+                                  {diff > 0 ? '-' : '+'}₹{Math.abs(diff).toLocaleString()}
+                                  <span className="text-xs ml-1">({diffPercent}%)</span>
+                                </span>
+                                    </TableCell>
+                                  </TableRow>
+                              );
+                            })}
+                          </TableBody>
+                        </Table>
+
+                        {/* Totals Row */}
+                        <div className="p-4 bg-purple-50 border-t border-purple-200">
+                          <div className="grid grid-cols-3 gap-4 text-center">
+                            <div>
+                              <p className="text-xs text-muted-foreground">Your Quoted Total</p>
+                              <p className="text-lg font-bold">₹{companyQuotedTotal.toLocaleString()}</p>
+                            </div>
+                            <div>
+                              <p className="text-xs text-muted-foreground">Customer Wants</p>
+                              <p className="text-lg font-bold">₹{customerTargetTotal.toLocaleString()}</p>
+                            </div>
+                            <div>
+                              <p className="text-xs text-muted-foreground">Difference</p>
+                              <p className={`text-lg font-bold ${priceDifference < 0 ? 'text-red-600' : 'text-green-600'}`}>
+                                {priceDifference < 0 ? '-' : '+'}₹{Math.abs(priceDifference).toLocaleString()}
+                                <span className="text-sm ml-1">({priceDifferencePercent}%)</span>
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Action Buttons */}
+                      <div className="flex flex-wrap gap-3 mt-4">
+                        <Button
+                            onClick={() => setShowAcceptDialog(true)}
+                            className="bg-green-600 hover:bg-green-700"
+                        >
+                          <Check className="h-4 w-4 mr-2" />
+                          Accept Counter (₹{customerTargetTotal.toLocaleString()})
+                        </Button>
+                        <Button
+                            variant="outline"
+                            onClick={() => {
+                              initializeQuotedPrices();
+                              setShowSendQuoteDialog(true);
+                            }}
+                        >
+                          <Send className="h-4 w-4 mr-2" />
+                          Send New Quote
+                        </Button>
+                        <Button
+                            variant="destructive"
+                            onClick={() => setShowRejectDialog(true)}
+                        >
+                          <XCircle className="h-4 w-4 mr-2" />
+                          Reject & End Negotiation
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+          )}
+
+          {/* Awaiting Customer Response */}
+          {awaitingCustomer && (
+              <Card className="border-blue-200 bg-blue-50">
+                <CardContent className="p-6">
+                  <div className="flex items-start gap-4">
+                    <Clock className="h-8 w-8 text-blue-600 mt-1" />
+                    <div>
+                      <h3 className="font-semibold text-lg text-blue-800">
+                        Awaiting Customer Response
+                      </h3>
+                      <p className="text-blue-700 mt-1">
+                        Your quote of ₹{companyQuotedTotal.toLocaleString()} has been sent.
+                        Waiting for customer to accept, reject, or counter-offer.
+                      </p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+          )}
+
+          {/* Order Confirmed */}
+          {frontendStatus === 'order_booked' && (
+              <Card className="border-green-200 bg-green-50">
+                <CardContent className="p-6">
+                  <div className="flex items-start gap-4">
+                    <Check className="h-8 w-8 text-green-600 mt-1" />
+                    <div>
+                      <h3 className="font-semibold text-lg text-green-800">
+                        Order Confirmed! 🎉
+                      </h3>
+                      <p className="text-green-700 mt-1">
+                        The negotiation is complete. Final order value: ₹{companyQuotedTotal.toLocaleString()}
+                      </p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+          )}
+
+          {/* Order Rejected */}
+          {frontendStatus === 'rejected' && (
+              <Card className="border-red-200 bg-red-50">
+                <CardContent className="p-6">
+                  <div className="flex items-start gap-4">
+                    <XCircle className="h-8 w-8 text-red-600 mt-1" />
+                    <div>
+                      <h3 className="font-semibold text-lg text-red-800">
+                        Quotation Rejected
+                      </h3>
+                      <p className="text-red-700 mt-1">
+                        This quotation has been rejected and the negotiation has ended.
                       </p>
                     </div>
                   </div>
@@ -865,22 +1061,17 @@ export default function OrderDetail() {
                       <TableRow>
                         <TableHead>Product</TableHead>
                         <TableHead className="text-center">Qty</TableHead>
-                        <TableHead className="text-right">Unit Price</TableHead>
-                        <TableHead className="text-center">Tax</TableHead>
-                        <TableHead className="text-right">Tax Amt</TableHead>
+                        {isQuotation && <TableHead className="text-right">Target Price</TableHead>}
+                        <TableHead className="text-right">{isQuotation ? 'Quoted Price' : 'Unit Price'}</TableHead>
                         <TableHead className="text-right">Total</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {apiOrder.items.map((item, index) => {
                         const product = productLookup[item.productId];
-                        const unitPrice = item.quotedPrice || item.targetPrice || item.price || 0;
-                        const quantity = item.quantity || 1;
-                        const lineSubtotal = quantity * unitPrice;
-                        // Get tax rate from product in inventory, default 18%
-                        const taxPercentage = product?.taxRate || 18;
-                        const taxAmount = lineSubtotal * (taxPercentage / 100);
-                        const lineTotal = lineSubtotal + taxAmount;
+                        const targetPrice = item.targetPrice || item.price || 0;
+                        const quotedPrice = item.quotedPrice || item.targetPrice || item.price || 0;
+                        const lineTotal = item.quantity * quotedPrice;
 
                         return (
                             <TableRow key={index}>
@@ -897,21 +1088,24 @@ export default function OrderDetail() {
                                 </div>
                               </TableCell>
                               <TableCell className="text-center">
-                                {quantity} pieces
+                                {item.quantity} pcs
                               </TableCell>
+                              {isQuotation && (
+                                  <TableCell className="text-right">
+                                    ₹{targetPrice.toLocaleString()}
+                                  </TableCell>
+                              )}
                               <TableCell className="text-right">
-                                ₹{unitPrice.toLocaleString()}
-                              </TableCell>
-                              <TableCell className="text-center">
-                                <Badge className="bg-amber-100 text-amber-700 hover:bg-amber-100 border-amber-200">
-                                  {taxPercentage}%
-                                </Badge>
-                              </TableCell>
-                              <TableCell className="text-right text-muted-foreground">
-                                ₹{Math.round(taxAmount).toLocaleString()}
+                                {isQuotation && item.quotedPrice ? (
+                                    <span className={item.quotedPrice > targetPrice ? 'text-red-600' : 'text-green-600'}>
+                                ₹{quotedPrice.toLocaleString()}
+                              </span>
+                                ) : (
+                                    `₹${quotedPrice.toLocaleString()}`
+                                )}
                               </TableCell>
                               <TableCell className="text-right font-medium">
-                                ₹{Math.round(lineTotal).toLocaleString()}
+                                ₹{lineTotal.toLocaleString()}
                               </TableCell>
                             </TableRow>
                         );
@@ -921,375 +1115,219 @@ export default function OrderDetail() {
 
                   <Separator className="my-4" />
 
-                  {/* Summary Section - With inline editing */}
+                  {/* Summary Section */}
                   <div className="space-y-2">
+                    {isQuotation && (
+                        <div className="flex justify-between text-sm">
+                          <span className="text-muted-foreground">Customer's Target Total</span>
+                          <span>₹{customerTargetTotal.toLocaleString()}</span>
+                        </div>
+                    )}
                     <div className="flex justify-between text-sm">
-                      <span className="text-muted-foreground">Subtotal</span>
-                      <span>₹{(() => {
-                        const sub = apiOrder.items.reduce((sum, item) => {
-                          const price = item.quotedPrice || item.targetPrice || item.price || 0;
-                          return sum + ((item.quantity || 1) * price);
-                        }, 0);
-                        return sub.toLocaleString();
-                      })()}</span>
+                      <span className="text-muted-foreground">{isQuotation ? 'Quoted Total' : 'Subtotal'}</span>
+                      <span>₹{companyQuotedTotal.toLocaleString()}</span>
                     </div>
-                    <div className="flex justify-between text-sm">
-                      <span className="text-muted-foreground">Total Tax</span>
-                      <span>₹{(() => {
-                        const tax = apiOrder.items.reduce((sum, item) => {
-                          const product = productLookup[item.productId];
-                          const price = item.quotedPrice || item.targetPrice || item.price || 0;
-                          const lineSubtotal = (item.quantity || 1) * price;
-                          // Get tax rate from product in inventory, default 18%
-                          const taxPercent = product?.taxRate || 18;
-                          return sum + (lineSubtotal * (taxPercent / 100));
-                        }, 0);
-                        return Math.round(tax).toLocaleString();
-                      })()}</span>
-                    </div>
-
-                    {/* Shipping - Editable in edit mode */}
-                    <div className="flex justify-between text-sm items-center">
-                      <span className="text-muted-foreground">Shipping</span>
-                      {isEditMode ? (
-                          <div className="flex items-center gap-1">
-                            <span className="text-muted-foreground">₹</span>
+                    {isEditMode ? (
+                        <>
+                          <div className="flex justify-between text-sm items-center">
+                            <span className="text-muted-foreground">Shipping</span>
                             <Input
                                 type="number"
-                                min={0}
+                                className="w-32 text-right"
                                 value={editFormData.shippingCost}
-                                onChange={(e) => setEditFormData(prev => ({ ...prev, shippingCost: Number(e.target.value) || 0 }))}
-                                className="w-24 h-8 text-right"
+                                onChange={(e) => setEditFormData(prev => ({
+                                  ...prev,
+                                  shippingCost: Number(e.target.value) || 0
+                                }))}
                             />
                           </div>
-                      ) : (
-                          <span>{(apiOrder.shippingCost || 0) > 0 ? `₹${apiOrder.shippingCost.toLocaleString()}` : 'Free'}</span>
-                      )}
-                    </div>
-
-                    {/* Discount - Editable in edit mode */}
-                    <div className="flex justify-between text-sm items-center">
-                      <span className="text-green-600">Discount</span>
-                      {isEditMode ? (
-                          <div className="flex items-center gap-1">
-                            <span className="text-green-600">-₹</span>
+                          <div className="flex justify-between text-sm items-center">
+                            <span className="text-muted-foreground">Discount</span>
                             <Input
                                 type="number"
-                                min={0}
+                                className="w-32 text-right"
                                 value={editFormData.discount}
-                                onChange={(e) => setEditFormData(prev => ({ ...prev, discount: Number(e.target.value) || 0 }))}
-                                className="w-24 h-8 text-right"
+                                onChange={(e) => setEditFormData(prev => ({
+                                  ...prev,
+                                  discount: Number(e.target.value) || 0
+                                }))}
                             />
                           </div>
-                      ) : (
-                          <span className={apiOrder.discount > 0 ? 'text-green-600' : ''}>
-                            {apiOrder.discount > 0 ? `-₹${apiOrder.discount.toLocaleString()}` : '₹0'}
-                          </span>
-                      )}
-                    </div>
-
-                    <Separator className="my-2" />
+                        </>
+                    ) : (
+                        <>
+                          {(apiOrder.shippingCost || 0) > 0 && (
+                              <div className="flex justify-between text-sm">
+                                <span className="text-muted-foreground">Shipping</span>
+                                <span>₹{(apiOrder.shippingCost || 0).toLocaleString()}</span>
+                              </div>
+                          )}
+                          {(apiOrder.discount || 0) > 0 && (
+                              <div className="flex justify-between text-sm">
+                                <span className="text-muted-foreground">Discount</span>
+                                <span className="text-green-600">-₹{(apiOrder.discount || 0).toLocaleString()}</span>
+                              </div>
+                          )}
+                        </>
+                    )}
+                    <Separator />
                     <div className="flex justify-between font-semibold text-lg">
-                      <span>Grand Total</span>
-                      <span>₹{(() => {
-                        const sub = apiOrder.items.reduce((sum, item) => {
-                          const price = item.quotedPrice || item.targetPrice || item.price || 0;
-                          return sum + ((item.quantity || 1) * price);
-                        }, 0);
-                        const tax = apiOrder.items.reduce((sum, item) => {
-                          const product = productLookup[item.productId];
-                          const price = item.quotedPrice || item.targetPrice || item.price || 0;
-                          const lineSubtotal = (item.quantity || 1) * price;
-                          // Get tax rate from product in inventory, default 18%
-                          const taxPercent = product?.taxRate || 18;
-                          return sum + (lineSubtotal * (taxPercent / 100));
-                        }, 0);
-                        // Use editFormData values if in edit mode, otherwise use apiOrder values
-                        const shipping = isEditMode ? editFormData.shippingCost : (apiOrder.shippingCost || 0);
-                        const discount = isEditMode ? editFormData.discount : (apiOrder.discount || 0);
-                        const total = sub + tax + shipping - discount;
-                        return Math.round(total).toLocaleString();
-                      })()}</span>
+                      <span>Total</span>
+                      <span>₹{(companyQuotedTotal + (apiOrder.shippingCost || 0) - (apiOrder.discount || 0)).toLocaleString()}</span>
                     </div>
                   </div>
                 </CardContent>
               </Card>
 
-              {/* Notes - Editable in edit mode */}
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-lg">Notes</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  {isEditMode ? (
-                      <Textarea
-                          value={editFormData.notes}
-                          onChange={(e) => setEditFormData(prev => ({ ...prev, notes: e.target.value }))}
-                          placeholder="Add notes about this order..."
-                          rows={3}
-                          className="w-full"
-                      />
-                  ) : order.notes ? (
-                      <p className="text-sm bg-muted p-3 rounded">{order.notes}</p>
-                  ) : (
-                      <p className="text-sm text-muted-foreground">No notes added</p>
-                  )}
-                </CardContent>
-              </Card>
-
-              {/* Invoice Section - Single Card matching screenshot layout */}
-              {['order_booked', 'confirmed', 'processing', 'shipped', 'delivered', 'completed'].includes(frontendStatus) ? (
+              {/* Notes Section */}
+              {(apiOrder.notes || isEditMode) && (
                   <Card>
-                    <CardHeader className="pb-3">
-                      <CardTitle className="text-lg flex items-center gap-2">
-                        <FileText className="h-4 w-4" />
-                        <FileText className="h-4 w-4" />
-                        Invoices for this Order
-                      </CardTitle>
+                    <CardHeader>
+                      <CardTitle className="text-lg">Notes</CardTitle>
                     </CardHeader>
                     <CardContent>
-                      {invoices.length > 0 ? (
-                          <Table>
-                            <TableHeader>
-                              <TableRow>
-                                <TableHead>Invoice No</TableHead>
-                                <TableHead>Type</TableHead>
-                                <TableHead>Date</TableHead>
-                                <TableHead className="text-right">Amount</TableHead>
-                                <TableHead>Status</TableHead>
-                                <TableHead className="text-right">Actions</TableHead>
-                              </TableRow>
-                            </TableHeader>
-                            <TableBody>
-                              {invoices.map((invoice) => (
-                                  <TableRow key={invoice.id}>
-                                    <TableCell>
-                                      <Button
-                                          variant="link"
-                                          className="p-0 h-auto font-medium text-primary"
-                                          onClick={() => handleViewInvoice(invoice)}
-                                      >
-                                        {invoice.invoiceNumber}
-                                      </Button>
-                                    </TableCell>
-                                    <TableCell>
-                                      {invoice.type === 'proforma' ? (
-                                          <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200">
-                                            Proforma
-                                          </Badge>
-                                      ) : (
-                                          <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200">
-                                            Tax Invoice
-                                          </Badge>
-                                      )}
-                                    </TableCell>
-                                    <TableCell>{format(new Date(invoice.invoiceDate), 'PP')}</TableCell>
-                                    <TableCell className="text-right font-medium">
-                                      {formatCurrency(invoice.grandTotal)}
-                                    </TableCell>
-                                    <TableCell>
-                                      {invoice.status === 'draft' && <Badge variant="secondary">Draft</Badge>}
-                                      {invoice.status === 'sent' && <Badge className="bg-blue-100 text-blue-700 hover:bg-blue-100">Sent</Badge>}
-                                      {invoice.status === 'paid' && <Badge className="bg-green-100 text-green-700 hover:bg-green-100">Paid</Badge>}
-                                      {invoice.status === 'cancelled' && <Badge variant="destructive">Cancelled</Badge>}
-                                    </TableCell>
-                                    <TableCell className="text-right">
-                                      <div className="flex justify-end gap-1">
-                                        <Tooltip>
-                                          <TooltipTrigger asChild>
-                                            <Button
-                                                variant="ghost"
-                                                size="icon"
-                                                className="h-8 w-8"
-                                                onClick={() => handleViewInvoice(invoice)}
-                                            >
-                                              <Eye className="h-4 w-4" />
-                                            </Button>
-                                          </TooltipTrigger>
-                                          <TooltipContent>View Invoice</TooltipContent>
-                                        </Tooltip>
-                                        <Tooltip>
-                                          <TooltipTrigger asChild>
-                                            <Button
-                                                variant="ghost"
-                                                size="icon"
-                                                className="h-8 w-8"
-                                                onClick={() => handleDownloadInvoicePDF(invoice)}
-                                            >
-                                              <Download className="h-4 w-4" />
-                                            </Button>
-                                          </TooltipTrigger>
-                                          <TooltipContent>Download PDF</TooltipContent>
-                                        </Tooltip>
-                                        <Tooltip>
-                                          <TooltipTrigger asChild>
-                                            <Button
-                                                variant="ghost"
-                                                size="icon"
-                                                className="h-8 w-8"
-                                                onClick={() => handlePrintInvoice(invoice)}
-                                            >
-                                              <Printer className="h-4 w-4" />
-                                            </Button>
-                                          </TooltipTrigger>
-                                          <TooltipContent>Print</TooltipContent>
-                                        </Tooltip>
-                                        <Tooltip>
-                                          <TooltipTrigger asChild>
-                                            <Button
-                                                variant="ghost"
-                                                size="icon"
-                                                className="h-8 w-8"
-                                                onClick={() => handleSendInvoice(invoice)}
-                                            >
-                                              <Send className="h-4 w-4" />
-                                            </Button>
-                                          </TooltipTrigger>
-                                          <TooltipContent>Send to Customer</TooltipContent>
-                                        </Tooltip>
-                                      </div>
-                                    </TableCell>
-                                  </TableRow>
-                              ))}
-                            </TableBody>
-                          </Table>
+                      {isEditMode ? (
+                          <Textarea
+                              value={editFormData.notes}
+                              onChange={(e) => setEditFormData(prev => ({ ...prev, notes: e.target.value }))}
+                              placeholder="Add notes..."
+                              rows={4}
+                          />
                       ) : (
-                          <div className="text-center py-8">
-                            <FileText className="h-10 w-10 mx-auto text-muted-foreground mb-3" />
-                            <p className="text-sm text-muted-foreground mb-2">
-                              No invoices generated yet.
-                            </p>
-                            <p className="text-xs text-muted-foreground">
-                              Invoices will be auto-generated based on order status.
-                            </p>
-                          </div>
+                          <p className="text-muted-foreground">{apiOrder.notes || 'No notes'}</p>
                       )}
                     </CardContent>
                   </Card>
-              ) : (
+              )}
+
+              {/* Invoices Section - Auto-generated based on status */}
+              {invoices.length > 0 && (
                   <Card>
                     <CardHeader>
-                      <CardTitle className="text-lg flex items-center gap-2">
-                        <FileText className="h-4 w-4" />
-                        <FileText className="h-4 w-4" />
-                        Invoices for this Order
-                      </CardTitle>
+                      <CardTitle className="text-lg">Invoices</CardTitle>
                     </CardHeader>
                     <CardContent>
-                      <div className="text-center py-6">
-                        <FileText className="h-10 w-10 mx-auto text-muted-foreground mb-3" />
-                        <p className="text-sm text-muted-foreground">
-                          Invoices will be available once the order is confirmed.
-                        </p>
-                      </div>
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>Invoice #</TableHead>
+                            <TableHead>Type</TableHead>
+                            <TableHead>Date</TableHead>
+                            <TableHead className="text-right">Amount</TableHead>
+                            <TableHead className="text-right">Actions</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {invoices.map((invoice) => (
+                              <TableRow key={invoice.id}>
+                                <TableCell className="font-medium">{invoice.invoiceNumber}</TableCell>
+                                <TableCell>
+                                  <Badge variant={invoice.type === 'proforma' ? 'outline' : 'default'}>
+                                    {invoice.type === 'proforma' ? 'Proforma' : 'Tax Invoice'}
+                                  </Badge>
+                                </TableCell>
+                                <TableCell>{format(new Date(invoice.invoiceDate), 'PP')}</TableCell>
+                                <TableCell className="text-right">₹{invoice.grandTotal.toLocaleString()}</TableCell>
+                                <TableCell className="text-right">
+                                  <Button
+                                      size="sm"
+                                      variant="ghost"
+                                      onClick={() => handleViewInvoice(invoice)}
+                                  >
+                                    <Eye className="h-4 w-4" />
+                                  </Button>
+                                </TableCell>
+                              </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
                     </CardContent>
                   </Card>
               )}
             </div>
 
-            {/* Right Column - Customer & Address */}
+            {/* Right Column */}
             <div className="space-y-6">
-              {/* Customer Card */}
+              {/* Customer Info */}
               <Card>
                 <CardHeader>
-                  <CardTitle className="text-lg flex items-center justify-between">
-                                    <span className="flex items-center gap-2">
-                                        <User className="h-4 w-4" />
-                                        Customer
-                                    </span>
-                    {linkedCustomer && (
-                        <Link
-                            to={`/customers/${linkedCustomer._id}`}
-                            className="text-xs text-primary hover:underline flex items-center gap-1"
-                        >
-                          View Profile
-                          <ExternalLink className="h-3 w-3" />
-                        </Link>
-                    )}
+                  <CardTitle className="text-lg flex items-center gap-2">
+                    <User className="h-5 w-5" />
+                    Customer
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-3">
-                  {customersLoading ? (
-                      <div className="flex items-center gap-2 text-muted-foreground">
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                        <span>Loading...</span>
+                  <div>
+                    <p className="font-medium">{linkedCustomer?.contactPerson || linkedCustomer?.businessName || 'Unknown'}</p>
+                    {linkedCustomer?.businessName && linkedCustomer?.contactPerson && (
+                        <p className="text-sm text-muted-foreground">{linkedCustomer.businessName}</p>
+                    )}
+                  </div>
+                  {linkedCustomer?.email && (
+                      <div className="flex items-center gap-2 text-sm">
+                        <Mail className="h-4 w-4 text-muted-foreground" />
+                        <span>{linkedCustomer.email}</span>
                       </div>
-                  ) : (
-                      <>
-                        <div>
-                          <p className="font-medium">{order.customer.name}</p>
-                          {order.customer.company && (
-                              <p className="text-sm text-muted-foreground">{order.customer.company}</p>
-                          )}
-                        </div>
-                        <div className="flex items-center gap-2 text-sm">
-                          <Mail className="h-4 w-4 text-muted-foreground" />
-                          <span>{order.customer.email || 'N/A'}</span>
-                        </div>
-                        <div className="flex items-center gap-2 text-sm">
-                          <Phone className="h-4 w-4 text-muted-foreground" />
-                          <span>{order.customer.phone || 'N/A'}</span>
-                        </div>
-                        {linkedCustomer?.gstNumber && (
-                            <div className="flex items-center gap-2 text-sm">
-                              <FileText className="h-4 w-4 text-muted-foreground" />
-                              <span>GST: {linkedCustomer.gstNumber}</span>
-                            </div>
-                        )}
-                      </>
+                  )}
+                  {linkedCustomer?.primaryPhone && (
+                      <div className="flex items-center gap-2 text-sm">
+                        <Phone className="h-4 w-4 text-muted-foreground" />
+                        <span>{linkedCustomer.primaryPhone}</span>
+                      </div>
+                  )}
+                  {linkedCustomer && (
+                      <Button variant="link" className="p-0 h-auto" asChild>
+                        <Link to={`/customers/${linkedCustomer._id}`}>
+                          View Customer Profile
+                          <ExternalLink className="h-3 w-3 ml-1" />
+                        </Link>
+                      </Button>
                   )}
                 </CardContent>
               </Card>
 
               {/* Shipping Address */}
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-lg flex items-center gap-2">
-                    <MapPin className="h-4 w-4" />
-                    Shipping Address
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  {order.shippingAddress.street || order.shippingAddress.city ? (
-                      <div className="text-sm space-y-0.5">
-                        {order.shippingAddress.street && <p>{order.shippingAddress.street}</p>}
-                        <p>
-                          {order.shippingAddress.city}
-                          {order.shippingAddress.state && `, ${order.shippingAddress.state}`}
-                        </p>
-                        {order.shippingAddress.pincode && <p>{order.shippingAddress.pincode}</p>}
-                        <p>{order.shippingAddress.country}</p>
-                      </div>
-                  ) : (
-                      <p className="text-sm text-muted-foreground">No shipping address provided</p>
-                  )}
-                </CardContent>
-              </Card>
+              {(order.shippingAddress.street || order.shippingAddress.city) && (
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="text-lg flex items-center gap-2">
+                        <MapPin className="h-5 w-5" />
+                        Shipping Address
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <p className="text-sm">
+                        {order.shippingAddress.street}<br />
+                        {order.shippingAddress.city}, {order.shippingAddress.state}<br />
+                        {order.shippingAddress.pincode}
+                      </p>
+                    </CardContent>
+                  </Card>
+              )}
 
               {/* Billing Address */}
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-lg flex items-center gap-2">
-                    <Building2 className="h-4 w-4" />
-                    Billing Address
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  {order.billingAddress.street || order.billingAddress.city ? (
-                      <div className="text-sm space-y-0.5">
-                        {order.billingAddress.street && <p>{order.billingAddress.street}</p>}
-                        <p>
-                          {order.billingAddress.city}
-                          {order.billingAddress.state && `, ${order.billingAddress.state}`}
-                        </p>
-                        {order.billingAddress.pincode && <p>{order.billingAddress.pincode}</p>}
-                        <p>{order.billingAddress.country}</p>
-                      </div>
-                  ) : (
-                      <p className="text-sm text-muted-foreground">No billing address provided</p>
-                  )}
-                </CardContent>
-              </Card>
+              {(order.billingAddress.street || order.billingAddress.city) && (
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="text-lg flex items-center gap-2">
+                        <CreditCard className="h-5 w-5" />
+                        Billing Address
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <p className="text-sm">
+                        {order.billingAddress.street}<br />
+                        {order.billingAddress.city}, {order.billingAddress.state}<br />
+                        {order.billingAddress.pincode}
+                      </p>
+                      {linkedCustomer?.gstNumber && (
+                          <p className="text-sm mt-2">
+                            <span className="text-muted-foreground">GSTIN:</span> {linkedCustomer.gstNumber}
+                          </p>
+                      )}
+                    </CardContent>
+                  </Card>
+              )}
 
               {/* Order Info */}
               <Card>
@@ -1328,18 +1366,21 @@ export default function OrderDetail() {
           </div>
         </div>
 
+        {/* =================================================================== */}
+        {/* DIALOGS */}
+        {/* =================================================================== */}
+
         {/* Send Quote Dialog */}
         <Dialog open={showSendQuoteDialog} onOpenChange={setShowSendQuoteDialog}>
           <DialogContent className="max-w-2xl">
             <DialogHeader>
               <DialogTitle>Send Quote to Customer</DialogTitle>
               <DialogDescription>
-                Review customer's target prices and enter your quoted prices for each product.
+                Enter your quoted price for each product. This will be sent to the customer for review.
               </DialogDescription>
             </DialogHeader>
 
             <div className="space-y-4 py-4">
-              {/* Products */}
               {apiOrder.items.map((item, index) => {
                 const product = productLookup[item.productId];
                 const targetPrice = item.targetPrice || item.price || 0;
@@ -1373,7 +1414,6 @@ export default function OrderDetail() {
 
               <Separator />
 
-              {/* Totals comparison */}
               <div className="grid grid-cols-2 gap-4 p-4 bg-muted rounded-lg">
                 <div>
                   <p className="text-sm text-muted-foreground">Customer Target Total</p>
@@ -1390,7 +1430,6 @@ export default function OrderDetail() {
                 </div>
               </div>
 
-              {/* Notes */}
               <div>
                 <Label>Notes to Customer (Optional)</Label>
                 <Textarea
@@ -1421,61 +1460,91 @@ export default function OrderDetail() {
           </DialogContent>
         </Dialog>
 
-        {/* Invoice Generator Dialog */}
-        {apiOrder && (
-            <InvoiceGeneratorDialog
-                open={showInvoiceDialog}
-                onOpenChange={setShowInvoiceDialog}
-                order={{
-                  id: apiOrder._id,
-                  _id: apiOrder._id,
-                  orderNumber: apiOrder.orderNumber,
-                  orderId: apiOrder.orderId,
-                  customerId: apiOrder.customerId,
-                  customer: {
-                    id: linkedCustomer?._id || apiOrder.customerId || '',
-                    name: linkedCustomer?.contactPerson || linkedCustomer?.businessName || 'Customer',
-                    email: linkedCustomer?.email || '',
-                    phone: linkedCustomer?.primaryPhone || '',
-                    type: 'wholesaler',
-                    company: linkedCustomer?.businessName,
-                  },
-                  items: apiOrder.items.map(item => ({
-                    productId: item.productId,
-                    productName: productLookup[item.productId]?.name || 'Product',
-                    quantity: item.quantity,
-                    price: item.quotedPrice || item.price || 0,
-                    total: item.quantity * (item.quotedPrice || item.price || 0),
-                  })),
-                  subtotal: apiOrder.quotedTotal || apiOrder.totalAmount,
-                  total: (apiOrder.quotedTotal || apiOrder.totalAmount) + (apiOrder.shippingCost || 0) - (apiOrder.discount || 0),
-                  status: frontendStatus,
-                  createdAt: apiOrder.createdAt,
-                  updatedAt: apiOrder.updatedAt,
-                  billingAddress: {
-                    street: linkedCustomer?.billingAddress?.streetAddress || '',
-                    city: linkedCustomer?.billingAddress?.city || '',
-                    state: linkedCustomer?.billingAddress?.state || 'Maharashtra',
-                    pincode: linkedCustomer?.billingAddress?.pinCode || '',
-                    country: 'India',
-                  },
-                  shippingAddress: {
-                    street: apiOrder.shippingAddress?.streetAddress || '',
-                    city: apiOrder.shippingAddress?.city || '',
-                    state: apiOrder.shippingAddress?.state || 'Maharashtra',
-                    pincode: apiOrder.shippingAddress?.pinCode || '',
-                    country: 'India',
-                  },
-                  shippingCost: apiOrder.shippingCost || 0,
-                  discount: apiOrder.discount || 0,
-                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                } as any}
-                invoiceType={invoiceType}
-                onInvoiceSaved={handleInvoiceSaved}
-            />
-        )}
+        {/* Accept Confirmation Dialog */}
+        <Dialog open={showAcceptDialog} onOpenChange={setShowAcceptDialog}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>
+                {needsQuoteResponse ? 'Accept Quote Request' : 'Accept Counter-Offer'}
+              </DialogTitle>
+              <DialogDescription>
+                {needsQuoteResponse
+                    ? "Accept the customer's target price and confirm the order?"
+                    : "Accept the customer's counter-offer and confirm the order?"
+                }
+              </DialogDescription>
+            </DialogHeader>
 
-        {/* Invoice View Dialog */}
+            <div className="py-4">
+              <div className="bg-green-50 border border-green-200 rounded-lg p-4 text-center">
+                <p className="text-sm text-green-700">Order will be confirmed at</p>
+                <p className="text-3xl font-bold text-green-800">
+                  ₹{customerTargetTotal.toLocaleString()}
+                </p>
+              </div>
+            </div>
+
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setShowAcceptDialog(false)}>
+                Cancel
+              </Button>
+              <Button
+                  onClick={handleAccept}
+                  disabled={acceptCounterMutation.isPending || acceptQuoteRequestMutation.isPending}
+                  className="bg-green-600 hover:bg-green-700"
+              >
+                {(acceptCounterMutation.isPending || acceptQuoteRequestMutation.isPending) && (
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                )}
+                <Check className="h-4 w-4 mr-2" />
+                Confirm & Accept
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Reject Confirmation Dialog */}
+        <Dialog open={showRejectDialog} onOpenChange={setShowRejectDialog}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>
+                {needsQuoteResponse ? 'Reject Quote Request' : 'Reject Counter-Offer'}
+              </DialogTitle>
+              <DialogDescription>
+                This will end the negotiation. This action cannot be undone.
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="py-4">
+              <Label>Reason (Optional)</Label>
+              <Textarea
+                  value={rejectReason}
+                  onChange={(e) => setRejectReason(e.target.value)}
+                  placeholder="Provide a reason for rejection..."
+                  rows={3}
+              />
+            </div>
+
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setShowRejectDialog(false)}>
+                Cancel
+              </Button>
+              <Button
+                  variant="destructive"
+                  onClick={handleReject}
+                  disabled={rejectCounterMutation.isPending || rejectQuoteRequestMutation.isPending}
+              >
+                {(rejectCounterMutation.isPending || rejectQuoteRequestMutation.isPending) && (
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                )}
+                <XCircle className="h-4 w-4 mr-2" />
+                Reject
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Invoice View Dialog - For viewing auto-generated invoices */}
         <InvoiceViewDialog
             open={viewInvoiceDialogOpen}
             onOpenChange={setViewInvoiceDialogOpen}
