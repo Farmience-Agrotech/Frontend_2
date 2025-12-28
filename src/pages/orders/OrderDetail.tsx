@@ -1151,8 +1151,8 @@ export default function OrderDetail() {
                       </h3>
                       <p className="text-blue-700 mt-1">
                         {frontendStatus === 'order_booked' && 'Order is confirmed. Ready to start processing?'}
-                        {frontendStatus === 'payment_pending' && 'Payment is pending. You can still start processing the order.'}
-                        {frontendStatus === 'paid' && 'Payment received. Ready to ship the order?'}
+                        {frontendStatus === 'payment_pending' && 'Payment received?. Start processing the order.'}
+                        {frontendStatus === 'paid' && 'Ready to ship the order?'}
                         {frontendStatus === 'processing' && 'Order is being processed. Ready to book shipment?'}
                         {frontendStatus === 'shipped' && 'Order has been shipped. Confirm delivery when complete.'}
                       </p>
