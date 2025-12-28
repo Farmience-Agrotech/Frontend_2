@@ -52,8 +52,8 @@ const Login = () => {
                     <div className="flex items-center justify-center w-16 h-16 rounded-2xl bg-primary mb-4">
                         <Package className="w-8 h-8 text-primary-foreground" />
                     </div>
-                    <h1 className="text-2xl font-bold text-foreground">BulkFlow</h1>
-                    <p className="text-muted-foreground">Inventory Management System</p>
+                    <h1 className="text-2xl font-bold text-foreground">Orkhest</h1>
+                    <p className="text-muted-foreground">Order Management System</p>
                 </div>
 
                 {/* Login Card */}
@@ -145,7 +145,7 @@ const Login = () => {
 
                 {/* Footer */}
                 <p className="text-center text-sm text-muted-foreground mt-6">
-                    © {new Date().getFullYear()} BulkFlow. All rights reserved.
+                    © {new Date().getFullYear()} Orkhest. All rights reserved.
                 </p>
             </div>
         </div>

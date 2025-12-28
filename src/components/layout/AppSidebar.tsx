@@ -66,8 +66,8 @@ export function AppSidebar() {
             </div>
             {!isCollapsed && (
                 <div className="flex flex-col">
-                  <span className="font-semibold text-sidebar-foreground">BulkFlow</span>
-                  <span className="text-xs text-sidebar-foreground/60">Order Management</span>
+                  <span className="font-semibold text-sidebar-foreground">Orkhest</span>
+                  <span className="text-xs text-sidebar-foreground/60">Order Management System</span>
                 </div>
             )}
           </div>
@@ -157,7 +157,7 @@ export function AppSidebar() {
             {/* Footer Text */}
             {!isCollapsed && (
                 <div className="text-xs text-sidebar-foreground/50 text-center">
-                  © 2024 BulkFlow
+                  © 2024 Orkhest
                 </div>
             )}
           </div>
