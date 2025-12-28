@@ -60,7 +60,7 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
               </div>
 
               <div className="flex items-center gap-3">
-                <RoleSwitcher />
+                {/* <RoleSwitcher /> */}
 
                 <NotificationsDropdown />
 
