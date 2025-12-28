@@ -14,7 +14,7 @@ const mapStatusToProgressStep = (status: OrderStatus): OrderStatus => {
     const statusMapping: Record<string, OrderStatus> = {
         'confirmed': 'order_booked',
         'payment_pending': 'order_booked',
-        'paid': 'order_booked',
+        'paid': 'processing',           // Changed: paid maps to processing
         'packed': 'processing',
         'completed': 'delivered',
     };
@@ -80,6 +80,10 @@ export function OrderProgressStepper({ currentStatus, timeline, className }: Ord
             if (stepIndex === rejectionStepIndex) return 'rejected';
             return 'pending';
         }
+
+        // If delivered/completed, ALL steps should be green (completed)
+        const isDelivered = currentStatus === 'delivered' || currentStatus === 'completed';
+        if (isDelivered) return 'completed';
 
         if (stepIndex < currentStepIndex) return 'completed';
         if (stepIndex === currentStepIndex) return 'current';
