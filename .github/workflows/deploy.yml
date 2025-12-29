@@ -49,4 +49,4 @@ jobs:
             fi
             
             pm2 serve dist 3000 --name "orkhest" --spa
-            sudo systemctl reload nginx
+            sudo systemctl restart nginx
