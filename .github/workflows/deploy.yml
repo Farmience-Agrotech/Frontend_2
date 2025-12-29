@@ -1,0 +1,36 @@
+name: deploy.yml
+on:
+  push:
+    branches: [ "main" ]
+    paths-ignore:
+      - 'README.md'
+      - 'insomnia/**'
+      - '.gitignore'
+      - 'LICENSE'
+
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Node.js setup
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Deploy to Ec2 via ssh
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            cd /home/${{ secrets.EC2_USER }}/react-app
+            git pull origin main
+            npm run build
+            pm2 serve dist 3000 --name "orkhest" --spa
+            sudo systemctl reload nginx
