@@ -41,13 +41,11 @@ jobs:
             git pull origin main
             fi
             
-            npm install
-            npm run build
             pm2 describe orkhest > /dev/null
             
             if [ $? -eq 0]; then
               echo "Restarting pm2"
-              pme2 delete orkhest
+              pm2 delete orkhest
             fi
             
             pm2 serve dist 3000 --name "orkhest" --spa
