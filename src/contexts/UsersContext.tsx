@@ -25,11 +25,11 @@ const UsersContext = createContext<UsersContextType | undefined>(undefined);
 const mockUsers: User[] = [
   {
     id: '1',
-    name: 'Rajesh Kumar',
-    email: 'rajesh@bulkflow.com',
+    name: 'Kiran Jain',
+    email: 'kiran@arihantuniform.com',
     phone: '+91 98765 43210',
     department: 'Management',
-    designation: 'CEO',
+    designation: 'Proprietor',
     roleId: '1', // Admin
     status: 'active',
     createdAt: new Date('2024-01-01'),

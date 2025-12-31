@@ -12,11 +12,20 @@ import { Camera, User, Settings as SettingsIcon, Building2, Landmark, Shield } f
 import { useToast } from '@/hooks/use-toast.ts';
 import { UsersRolesTab } from '@/components/settings/UsersRolesTab.tsx';
 import { usePermissions } from '@/hooks/usePermissions.ts';
+import { useUsers } from '@/contexts/UsersContext';
 
 export default function Settings() {
   const { toast } = useToast();
   const { hasPermission } = usePermissions();
+  const { currentUser, updateUser } = useUsers();
   const [theme, setTheme] = useState<'light' | 'dark'>('light');
+
+  // Profile form state
+  const [profileData, setProfileData] = useState({
+    name: currentUser?.name || '',
+    email: currentUser?.email || '',
+    phone: currentUser?.phone || '',
+  });
   
   const canViewUserManagement = hasPermission('userManagement', 'view');
   
@@ -32,6 +41,39 @@ export default function Settings() {
       title: "Settings saved",
       description: `Your ${section} have been updated successfully.`,
     });
+  };
+
+  const handleProfileSave = () => {
+    if (!currentUser) return;
+
+    const success = updateUser(currentUser.id, {
+      name: profileData.name,
+      email: profileData.email,
+      phone: profileData.phone,
+    });
+
+    if (success) {
+      toast({
+        title: "Profile updated",
+        description: "Your profile has been updated successfully.",
+      });
+    } else {
+      toast({
+        title: "Update failed",
+        description: "Failed to update profile. Please try again.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  // Helper to get initials
+  const getInitials = (name: string) => {
+    return name
+        .split(' ')
+        .map((n) => n[0])
+        .join('')
+        .toUpperCase()
+        .slice(0, 2);
   };
 
   return (
@@ -80,7 +122,9 @@ export default function Settings() {
                 <div className="flex items-center gap-4">
                   <div className="relative">
                     <Avatar className="h-20 w-20">
-                      <AvatarFallback className="bg-primary text-primary-foreground text-xl">AK</AvatarFallback>
+                      <AvatarFallback className="bg-primary text-primary-foreground text-xl">
+                        {getInitials(profileData.name || 'U')}
+                      </AvatarFallback>
                     </Avatar>
                     <Button size="icon" variant="secondary" className="absolute -bottom-1 -right-1 h-8 w-8 rounded-full">
                       <Camera className="h-4 w-4" />
@@ -95,19 +139,32 @@ export default function Settings() {
                 <div className="grid gap-4 md:grid-cols-2">
                   <div className="space-y-2">
                     <Label htmlFor="fullName">Full Name</Label>
-                    <Input id="fullName" defaultValue="Arun Kumar" />
+                    <Input
+                        id="fullName"
+                        value={profileData.name}
+                        onChange={(e) => setProfileData(prev => ({ ...prev, name: e.target.value }))}
+                    />
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="email">Email</Label>
-                    <Input id="email" type="email" defaultValue="arun.kumar@company.com" />
+                    <Input
+                        id="email"
+                        type="email"
+                        value={profileData.email}
+                        onChange={(e) => setProfileData(prev => ({ ...prev, email: e.target.value }))}
+                    />
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="phone">Phone</Label>
-                    <Input id="phone" defaultValue="+91 98765 43210" />
+                    <Input
+                        id="phone"
+                        value={profileData.phone}
+                        onChange={(e) => setProfileData(prev => ({ ...prev, phone: e.target.value }))}
+                    />
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="role">Designation / Role</Label>
-                    <Input id="role" defaultValue="Admin" disabled className="bg-muted" />
+                    <Input id="role" defaultValue={currentUser?.designation || 'User'} disabled className="bg-muted" />
                   </div>
                 </div>
 
@@ -130,7 +187,7 @@ export default function Settings() {
                 </div>
 
                 <div className="flex justify-end">
-                  <Button onClick={() => handleSave('profile settings')}>Save Changes</Button>
+                  <Button onClick={handleProfileSave}>Save Changes</Button>
                 </div>
               </CardContent>
             </Card>
@@ -256,38 +313,66 @@ export default function Settings() {
                 </div>
 
                 <div className="grid gap-4 md:grid-cols-2">
-                  <div className="space-y-2 md:col-span-2">
-                    <Label htmlFor="companyName">Company Name</Label>
-                    <Input id="companyName" defaultValue="Industrial Supplies Pvt. Ltd." />
+                  <div className="space-y-2">
+                    <Label htmlFor="tradeName">Trade Name</Label>
+                    <Input id="tradeName" defaultValue="ARIHANT UNIFORM" />
                   </div>
                   <div className="space-y-2">
-                    <Label htmlFor="gst">GST Number</Label>
-                    <Input id="gst" defaultValue="27AABCU9603R1ZM" />
+                    <Label htmlFor="legalName">Legal Name</Label>
+                    <Input id="legalName" defaultValue="KIRAN N JAIN" />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="gst">GSTIN</Label>
+                    <Input id="gst" defaultValue="29GOTPK6376A1ZC" />
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="pan">PAN Number</Label>
-                    <Input id="pan" defaultValue="AABCU9603R" />
+                    <Input id="pan" defaultValue="GOTPK6376A" />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="constitution">Constitution of Business</Label>
+                    <Input id="constitution" defaultValue="Proprietorship" disabled className="bg-muted" />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="registrationType">Registration Type</Label>
+                    <Input id="registrationType" defaultValue="Regular" disabled className="bg-muted" />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="registrationDate">GST Registration Date</Label>
+                    <Input id="registrationDate" defaultValue="17/10/2023" disabled className="bg-muted" />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="jurisdiction">Jurisdictional Office</Label>
+                    <Input id="jurisdiction" defaultValue="LGSTO 100 - Bengaluru" disabled className="bg-muted" />
                   </div>
                 </div>
 
                 <div className="border-t pt-6">
-                  <h3 className="font-medium mb-4">Address</h3>
+                  <h3 className="font-medium mb-4">Principal Place of Business</h3>
                   <div className="grid gap-4 md:grid-cols-2">
                     <div className="space-y-2 md:col-span-2">
                       <Label htmlFor="street">Street Address</Label>
-                      <Input id="street" defaultValue="123, Industrial Area, Phase II" />
+                      <Input id="street" defaultValue="1ST FLOOR, 147/8, MYSORE ROAD A.R COMPOUND" />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="area">Area / Locality</Label>
+                      <Input id="area" defaultValue="Chamarajpet" />
                     </div>
                     <div className="space-y-2">
                       <Label htmlFor="city">City</Label>
-                      <Input id="city" defaultValue="Mumbai" />
+                      <Input id="city" defaultValue="Bengaluru" />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="district">District</Label>
+                      <Input id="district" defaultValue="Bengaluru Urban" />
                     </div>
                     <div className="space-y-2">
                       <Label htmlFor="state">State</Label>
-                      <Input id="state" defaultValue="Maharashtra" />
+                      <Input id="state" defaultValue="Karnataka" />
                     </div>
                     <div className="space-y-2">
                       <Label htmlFor="pin">PIN Code</Label>
-                      <Input id="pin" defaultValue="400001" />
+                      <Input id="pin" defaultValue="560018" />
                     </div>
                   </div>
                 </div>
@@ -297,15 +382,15 @@ export default function Settings() {
                   <div className="grid gap-4 md:grid-cols-2">
                     <div className="space-y-2">
                       <Label htmlFor="companyPhone">Phone</Label>
-                      <Input id="companyPhone" defaultValue="+91 22 2345 6789" />
+                      <Input id="companyPhone" defaultValue="+91 80 2345 6789" />
                     </div>
                     <div className="space-y-2">
                       <Label htmlFor="companyEmail">Email</Label>
-                      <Input id="companyEmail" type="email" defaultValue="info@industrialsupplies.com" />
+                      <Input id="companyEmail" type="email" defaultValue="info@arihantuniform.com" />
                     </div>
                     <div className="space-y-2 md:col-span-2">
                       <Label htmlFor="website">Website</Label>
-                      <Input id="website" defaultValue="www.industrialsupplies.com" />
+                      <Input id="website" defaultValue="www.arihantuniform.com" />
                     </div>
                   </div>
                 </div>
@@ -328,23 +413,23 @@ export default function Settings() {
                 <div className="grid gap-4 md:grid-cols-2">
                   <div className="space-y-2 md:col-span-2">
                     <Label htmlFor="accountHolder">Account Holder Name</Label>
-                    <Input id="accountHolder" defaultValue="Industrial Supplies Pvt. Ltd." />
+                    <Input id="accountHolder" defaultValue="KIRAN N JAIN" />
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="accountNumber">Account Number</Label>
-                    <Input id="accountNumber" defaultValue="1234567890123456" />
+                    <Input id="accountNumber" defaultValue="" placeholder="Enter account number" />
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="ifsc">IFSC Code</Label>
-                    <Input id="ifsc" defaultValue="HDFC0001234" />
+                    <Input id="ifsc" defaultValue="" placeholder="Enter IFSC code" />
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="bankName">Bank Name</Label>
-                    <Input id="bankName" defaultValue="HDFC Bank" />
+                    <Input id="bankName" defaultValue="" placeholder="Enter bank name" />
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="upi">UPI ID (Optional)</Label>
-                    <Input id="upi" defaultValue="industrialsupplies@hdfcbank" placeholder="yourname@upi" />
+                    <Input id="upi" defaultValue="" placeholder="yourname@upi" />
                   </div>
                 </div>
 

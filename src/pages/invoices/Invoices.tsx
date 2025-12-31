@@ -189,14 +189,15 @@ const generateInvoiceFromOrder = (
     dueDate: new Date(orderDate.getTime() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
     placeOfSupply: `${buyerState} (${buyerStateCode})`,
     seller: {
-      companyName: 'Your Company Name',
-      address: 'Your Company Address',
-      city: 'Mumbai',
-      state: 'Maharashtra',
-      pin: '400001',
-      gstin: '27XXXXXXXXXXXXX',
-      pan: 'XXXXXXXXXX',
-      stateCode: '27',
+      companyName: 'ARIHANT UNIFORM',
+      address: '1ST FLOOR, 147/8, MYSORE ROAD A.R COMPOUND, Chamarajpet',
+      city: 'Bengaluru',
+      state: 'Karnataka',
+      pin: '560018',
+      gstin: '29GOTPK6376A1ZC',
+      pan: 'GOTPK6376A',
+      stateCode: '29',
+      email: 'info@arihantuniform.com',
     },
     buyer: {
       customerName: customer?.contactPerson ||
@@ -224,10 +225,10 @@ const generateInvoiceFromOrder = (
     roundOff: Math.round(roundOff * 100) / 100,
     grandTotal,
     bankDetails: {
-      accountName: 'Your Company Name',
-      accountNumber: 'XXXXXXXXXXXX',
-      ifsc: 'XXXX0000XXX',
-      bankName: 'Your Bank Name',
+      accountName: 'KIRAN N JAIN',
+      accountNumber: '',  // Add your account number
+      ifsc: '',           // Add your IFSC code
+      bankName: '',       // Add your bank name
     },
     terms: [
       'Payment due within 30 days from invoice date.',

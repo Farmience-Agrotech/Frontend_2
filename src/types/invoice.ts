@@ -23,6 +23,7 @@ export interface InvoiceSeller {
   gstin: string;
   pan: string;
   stateCode: string;
+  email?: string;
 }
 
 export interface InvoiceBuyer {

@@ -110,23 +110,23 @@ const formatCurrency = (amount: number): string => {
 
 // Default seller info from Settings
 const defaultSeller = {
-  companyName: 'BulkFlow Pvt. Ltd.',
-  address: '123 Business Park',
-  city: 'Mumbai',
-  state: 'Maharashtra',
-  pin: '400001',
-  gstin: '27AADCB2230M1ZT',
-  pan: 'AADCB2230M',
-  stateCode: '27',
+  companyName: 'ARIHANT UNIFORM',
+  address: '1ST FLOOR, 147/8, MYSORE ROAD A.R COMPOUND, Chamarajpet',
+  city: 'Bengaluru',
+  state: 'Karnataka',
+  pin: '560018',
+  gstin: '29GOTPK6376A1ZC',
+  pan: 'GOTPK6376A',
+  stateCode: '29',
+  email: 'info@arihantuniform.com',
 };
 
 const defaultBankDetails = {
-  accountName: 'BulkFlow Pvt. Ltd.',
-  accountNumber: '50200012345678',
-  ifsc: 'HDFC0001234',
-  bankName: 'HDFC Bank',
+  accountName: 'KIRAN N JAIN',
+  accountNumber: '',
+  ifsc: '',
+  bankName: '',
 };
-
 const defaultTerms = [
   'Goods once sold will not be taken back or exchanged.',
   'Payment is due within 30 days from the invoice date.',

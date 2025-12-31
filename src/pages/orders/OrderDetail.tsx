@@ -160,6 +160,23 @@ const getNoteStatusColor = (status: string): string => {
 };
 
 // =============================================================================
+// TAX CALCULATION HELPERS - Reverse calculate tax from price with tax included
+// =============================================================================
+
+const calculateTaxBreakdown = (priceWithTax: number, taxRate: number) => {
+  if (!taxRate || taxRate === 0) {
+    return { basePrice: priceWithTax, taxAmount: 0, taxRate: 0 };
+  }
+  const basePrice = priceWithTax / (1 + taxRate / 100);
+  const taxAmount = priceWithTax - basePrice;
+  return {
+    basePrice: Math.round(basePrice * 100) / 100,
+    taxAmount: Math.round(taxAmount * 100) / 100,
+    taxRate: taxRate,
+  };
+};
+
+// =============================================================================
 // STATUS MAPPING - FIXED!
 // =============================================================================
 
@@ -272,13 +289,15 @@ export default function OrderDetail() {
   // Product lookup
   const productLookup = useMemo(() => {
     if (!apiProducts) return {};
-    const lookup: Record<string, { name: string; sku: string; price: number; taxRate: number }> = {};
-    (apiProducts as Array<{ _id: string; name: string; sku?: string; minPrice?: number; price?: number; taxRate?: number; gstRate?: number; tax?: number }>).forEach((product) => {
+    const lookup: Record<string, { name: string; sku: string; price: number; taxRate: number; hsnCode: string; unit: string }> = {};
+    (apiProducts as Array<{ _id: string; name: string; sku?: string; minPrice?: number; price?: number; taxRate?: number; gstRate?: number; tax?: number; hsnCode?: string; unit?: string }>).forEach((product) => {
       lookup[product._id] = {
         name: product.name,
         sku: product.sku || '',
         price: product.minPrice || product.price || 0,
         taxRate: product.taxRate || product.gstRate || product.tax || 18,
+        hsnCode: product.hsnCode || '8483',
+        unit: product.unit || 'PCS',
       };
     });
     return lookup;
@@ -324,26 +343,61 @@ export default function OrderDetail() {
       const invoicePrefix = type === 'proforma' ? 'PI' : 'TI';
       const invoiceNumber = `${invoicePrefix}-${apiOrder.orderNumber || orderIdShort}`;
 
-      const subtotal = (apiOrder.items || []).reduce((sum, item) => {
-        const price = item.quotedPrice || item.targetPrice || item.price || 0;
-        return sum + ((item.quantity || 0) * price);
-      }, 0);
+      const invoiceItems = (apiOrder.items || []).map((item, index) => {
+        const product = productLookup[item.productId || ''];
+        const itemTaxRate = product?.taxRate || 18;
 
-      const taxAmount = (apiOrder.items || []).reduce((sum, item) => {
-        const product = productLookup[item.productId];
-        const price = item.quotedPrice || item.targetPrice || item.price || 0;
-        const lineSubtotal = (item.quantity || 0) * price;
-        const taxPercent = product?.taxRate || 18;
-        return sum + (lineSubtotal * (taxPercent / 100));
-      }, 0);
+        // Get the total price (includes tax)
+        const priceWithTax = item.quotedPrice || item.targetPrice || item.price || 0;
+
+        // Reverse calculate base price and tax (same as Order Items table)
+        const { basePrice, taxAmount: itemTax } = calculateTaxBreakdown(priceWithTax, itemTaxRate);
+
+        const qty = item.quantity || 1;
+        const taxableValue = Math.round(basePrice * qty * 100) / 100;
+        const taxAmountTotal = Math.round(itemTax * qty * 100) / 100;
+
+        return {
+          id: `item-${index}`,
+          hsnCode: product?.hsnCode || '8483',
+          description: product?.name || item.name || `Product ${(item.productId || '').slice(-6) || index + 1}`,
+          qty: qty,
+          unit: product?.unit || 'PCS',
+          rate: Math.round(basePrice * 100) / 100,
+          taxableValue: taxableValue,
+          taxPercentage: itemTaxRate,
+          taxAmount: taxAmountTotal,
+        };
+      });
+
+      // Calculate totals from invoice items
+      const subtotal = invoiceItems.reduce((sum, item) => sum + item.taxableValue, 0);
+      const taxAmount = invoiceItems.reduce((sum, item) => sum + (item.taxAmount || 0), 0);
 
       const shippingCost = apiOrder.shippingCost || 0;
       const discount = apiOrder.discount || 0;
       const grandTotal = subtotal + taxAmount + shippingCost - discount;
 
-      const sellerState = 'Maharashtra';
-      const buyerState = linkedCustomer.billingAddress?.state || 'Maharashtra';
+      const sellerState = 'Karnataka';
+      const buyerState = linkedCustomer?.billingAddress?.state || apiOrder.shippingAddress?.state || 'Karnataka';
       const isInterState = sellerState !== buyerState;
+
+      // State code lookup
+      const stateCodes: Record<string, string> = {
+        'Karnataka': '29',
+        'Tamil Nadu': '33',
+        'Maharashtra': '27',
+        'Delhi': '07',
+        'Gujarat': '24',
+        'Telangana': '36',
+        'Andhra Pradesh': '37',
+        'Kerala': '32',
+        'Uttar Pradesh': '09',
+        'West Bengal': '19',
+        'Rajasthan': '08',
+        'Punjab': '03',
+      };
+      const buyerStateCode = stateCodes[buyerState] || '29';
 
       const invoice: GeneratedInvoice = {
         id: `inv-${Date.now()}-${type}`,
@@ -353,72 +407,55 @@ export default function OrderDetail() {
         invoiceNumber: invoiceNumber,
         invoiceDate: now.toISOString(),
         dueDate: dueDate.toISOString(),
-        placeOfSupply: buyerState,
+        placeOfSupply: `${buyerState} (${buyerStateCode})`,
         seller: {
-          companyName: 'Your Company Name',
-          address: 'Your Company Address',
-          city: 'Mumbai',
+          companyName: 'ARIHANT UNIFORM',
+          address: '1ST FLOOR, 147/8, MYSORE ROAD A.R COMPOUND, Chamarajpet',
+          city: 'Bengaluru',
           state: sellerState,
-          pin: '400001',
-          gstin: '27XXXXXXXXXXXXX',
-          pan: 'XXXXXXXXXX',
-          stateCode: '27',
+          pin: '560018',
+          gstin: '29GOTPK6376A1ZC',
+          pan: 'GOTPK6376A',
+          stateCode: '29',
         },
         buyer: {
-          customerName: linkedCustomer.contactPerson || linkedCustomer.businessName || 'Customer',
-          companyName: linkedCustomer.businessName || '',
-          gstin: linkedCustomer.gstNumber || '',
-          stateCode: linkedCustomer.billingAddress?.state ? '33' : '27',
+          customerName: linkedCustomer?.contactPerson || linkedCustomer?.businessName || 'Customer',
+          companyName: linkedCustomer?.businessName || '',
+          gstin: linkedCustomer?.gstNumber || '',
+          stateCode: buyerStateCode,
         },
         billingAddress: {
-          street: linkedCustomer.billingAddress?.street || linkedCustomer.billingAddress?.streetAddress || '',
-          city: linkedCustomer.billingAddress?.city || '',
-          state: linkedCustomer.billingAddress?.state || '',
-          pin: linkedCustomer.billingAddress?.pinCode || '',
+          street: linkedCustomer?.billingAddress?.street || linkedCustomer?.billingAddress?.streetAddress || '',
+          city: linkedCustomer?.billingAddress?.city || '',
+          state: linkedCustomer?.billingAddress?.state || '',
+          pin: linkedCustomer?.billingAddress?.pinCode || '',
         },
         shippingAddress: {
-          street: apiOrder.shippingAddress?.streetAddress || linkedCustomer.deliveryAddresses?.[0]?.street || '',
-          city: apiOrder.shippingAddress?.city || linkedCustomer.deliveryAddresses?.[0]?.city || '',
-          state: apiOrder.shippingAddress?.state || linkedCustomer.deliveryAddresses?.[0]?.state || '',
-          pin: apiOrder.shippingAddress?.pinCode || linkedCustomer.deliveryAddresses?.[0]?.pinCode || '',
+          street: apiOrder.shippingAddress?.streetAddress || linkedCustomer?.deliveryAddresses?.[0]?.street || '',
+          city: apiOrder.shippingAddress?.city || linkedCustomer?.deliveryAddresses?.[0]?.city || '',
+          state: apiOrder.shippingAddress?.state || linkedCustomer?.deliveryAddresses?.[0]?.state || '',
+          pin: apiOrder.shippingAddress?.pinCode || linkedCustomer?.deliveryAddresses?.[0]?.pinCode || '',
         },
-        items: (apiOrder.items || []).map((item, index) => {
-          const product = productLookup[item.productId || ''];
-          const price = item.quotedPrice || item.targetPrice || item.price || 0;
-          const qty = item.quantity || 1;
-          const taxableValue = qty * price;
-          const productId = item.productId || '';
-          const itemTaxRate = product?.taxRate || 18;
-          return {
-            id: `item-${index}`,
-            hsnCode: '8483',
-            description: productLookup[productId]?.name || `Product ${productId.slice(-6) || index + 1}`,
-            qty: qty,
-            unit: 'PCS',
-            rate: price,
-            taxableValue: taxableValue,
-            taxPercentage: itemTaxRate,
-            taxAmount: taxableValue * (itemTaxRate / 100),
-          };
-        }),
-        subtotal: subtotal,
-        cgst: isInterState ? 0 : taxAmount / 2,
-        sgst: isInterState ? 0 : taxAmount / 2,
-        igst: isInterState ? taxAmount : 0,
+        items: invoiceItems,
+        subtotal: Math.round(subtotal * 100) / 100,
+        cgst: isInterState ? 0 : Math.round(taxAmount / 2 * 100) / 100,
+        sgst: isInterState ? 0 : Math.round(taxAmount / 2 * 100) / 100,
+        igst: isInterState ? Math.round(taxAmount * 100) / 100 : 0,
         shippingCost: shippingCost,
         discount: discount,
-        roundOff: 0,
+        discountPercent: subtotal > 0 ? Math.round((discount / subtotal) * 100) : 0,
+        roundOff: Math.round(grandTotal) - grandTotal,
         grandTotal: Math.round(grandTotal),
         bankDetails: {
-          accountName: 'Your Company Name',
-          accountNumber: 'XXXXXXXXXXXX',
-          ifsc: 'XXXX0000XXX',
-          bankName: 'Your Bank Name',
+          accountName: 'KIRAN N JAIN',
+          accountNumber: '',
+          ifsc: '',
+          bankName: '',
         },
         terms: [
           'Payment due within 30 days',
           'Goods once sold will not be taken back',
-          'Subject to jurisdiction of local courts',
+          'Subject to Bengaluru jurisdiction',
         ],
         status: 'sent',
         createdAt: now.toISOString(),
@@ -1374,6 +1411,7 @@ export default function OrderDetail() {
                         <TableHead className="text-center">Qty</TableHead>
                         {isQuotation && <TableHead className="text-right">Target Price</TableHead>}
                         <TableHead className="text-right">{isQuotation ? 'Quoted Price' : 'Unit Price'}</TableHead>
+                        {!isQuotation && <TableHead className="text-right">Tax</TableHead>}
                         <TableHead className="text-right">Total</TableHead>
                       </TableRow>
                     </TableHeader>
@@ -1383,6 +1421,11 @@ export default function OrderDetail() {
                         const targetPrice = item.targetPrice || item.price || 0;
                         const quotedPrice = item.quotedPrice || item.targetPrice || item.price || 0;
                         const lineTotal = item.quantity * quotedPrice;
+
+                        // Get tax rate from product and calculate breakdown
+                        const taxRate = product?.taxRate || 0;
+                        const { basePrice, taxAmount } = calculateTaxBreakdown(quotedPrice, taxRate);
+                        const lineTax = taxAmount * item.quantity;
 
                         return (
                             <TableRow key={index}>
@@ -1409,12 +1452,24 @@ export default function OrderDetail() {
                               <TableCell className="text-right">
                                 {isQuotation && item.quotedPrice ? (
                                     <span className={item.quotedPrice > targetPrice ? 'text-red-600' : 'text-green-600'}>
-                                ₹{quotedPrice.toLocaleString()}
-                              </span>
+                                      ₹{quotedPrice.toLocaleString()}
+                                    </span>
                                 ) : (
-                                    `₹${quotedPrice.toLocaleString()}`
+                                    <>
+                                      ₹{basePrice.toLocaleString()}
+                                      {taxRate > 0 && (
+                                          <p className="text-xs text-muted-foreground">
+                                            +{taxRate}% GST
+                                          </p>
+                                      )}
+                                    </>
                                 )}
                               </TableCell>
+                              {!isQuotation && (
+                                  <TableCell className="text-right text-muted-foreground">
+                                    ₹{lineTax.toLocaleString()}
+                                  </TableCell>
+                              )}
                               <TableCell className="text-right font-medium">
                                 ₹{lineTotal.toLocaleString()}
                               </TableCell>
@@ -1434,58 +1489,95 @@ export default function OrderDetail() {
                           <span>₹{customerTargetTotal.toLocaleString()}</span>
                         </div>
                     )}
-                    <div className="flex justify-between text-sm">
-                      <span className="text-muted-foreground">{isQuotation ? 'Quoted Total' : 'Subtotal'}</span>
-                      <span>₹{companyQuotedTotal.toLocaleString()}</span>
-                    </div>
-                    {isEditMode ? (
-                        <>
-                          <div className="flex justify-between text-sm items-center">
-                            <span className="text-muted-foreground">Shipping</span>
-                            <Input
-                                type="number"
-                                className="w-32 text-right"
-                                value={editFormData.shippingCost}
-                                onChange={(e) => setEditFormData(prev => ({
-                                  ...prev,
-                                  shippingCost: Number(e.target.value) || 0
-                                }))}
-                            />
-                          </div>
-                          <div className="flex justify-between text-sm items-center">
-                            <span className="text-muted-foreground">Discount</span>
-                            <Input
-                                type="number"
-                                className="w-32 text-right"
-                                value={editFormData.discount}
-                                onChange={(e) => setEditFormData(prev => ({
-                                  ...prev,
-                                  discount: Number(e.target.value) || 0
-                                }))}
-                            />
-                          </div>
-                        </>
-                    ) : (
-                        <>
-                          {(apiOrder.shippingCost || 0) > 0 && (
-                              <div className="flex justify-between text-sm">
-                                <span className="text-muted-foreground">Shipping</span>
-                                <span>₹{(apiOrder.shippingCost || 0).toLocaleString()}</span>
-                              </div>
-                          )}
-                          {(apiOrder.discount || 0) > 0 && (
-                              <div className="flex justify-between text-sm">
-                                <span className="text-muted-foreground">Discount</span>
-                                <span className="text-green-600">-₹{(apiOrder.discount || 0).toLocaleString()}</span>
-                              </div>
-                          )}
-                        </>
-                    )}
-                    <Separator />
-                    <div className="flex justify-between font-semibold text-lg">
-                      <span>Total</span>
-                      <span>₹{(companyQuotedTotal + (apiOrder.shippingCost || 0) - (apiOrder.discount || 0)).toLocaleString()}</span>
-                    </div>
+
+                    {/* Calculate subtotal and tax breakdown */}
+                    {(() => {
+                      let totalBasePrice = 0;
+                      let totalTax = 0;
+
+                      apiOrder.items.forEach(item => {
+                        const product = productLookup[item.productId];
+                        const quotedPrice = item.quotedPrice || item.targetPrice || item.price || 0;
+                        const taxRate = product?.taxRate || 0;
+                        const { basePrice, taxAmount } = calculateTaxBreakdown(quotedPrice, taxRate);
+                        totalBasePrice += basePrice * item.quantity;
+                        totalTax += taxAmount * item.quantity;
+                      });
+
+                      totalBasePrice = Math.round(totalBasePrice * 100) / 100;
+                      totalTax = Math.round(totalTax * 100) / 100;
+
+                      const shippingCost = apiOrder.shippingCost || 0;
+                      const discount = apiOrder.discount || 0;
+                      const grandTotal = totalBasePrice + totalTax + shippingCost - discount;
+
+                      return (
+                          <>
+                            {/* Subtotal (Base Price) */}
+                            <div className="flex justify-between text-sm">
+                              <span className="text-muted-foreground">{isQuotation ? 'Quoted Total' : 'Subtotal'}</span>
+                              <span>₹{totalBasePrice.toLocaleString()}</span>
+                            </div>
+
+                            {/* Tax */}
+                            {!isQuotation && totalTax > 0 && (
+                                <div className="flex justify-between text-sm">
+                                  <span className="text-muted-foreground">Tax (GST)</span>
+                                  <span>₹{totalTax.toLocaleString()}</span>
+                                </div>
+                            )}
+
+                            {/* Shipping & Discount */}
+                            {isEditMode ? (
+                                <>
+                                  <div className="flex justify-between text-sm items-center">
+                                    <span className="text-muted-foreground">Shipping</span>
+                                    <Input
+                                        type="number"
+                                        className="w-32 text-right"
+                                        value={editFormData.shippingCost}
+                                        onChange={(e) => setEditFormData(prev => ({
+                                          ...prev,
+                                          shippingCost: Number(e.target.value) || 0
+                                        }))}
+                                    />
+                                  </div>
+                                  <div className="flex justify-between text-sm items-center">
+                                    <span className="text-muted-foreground">Discount</span>
+                                    <Input
+                                        type="number"
+                                        className="w-32 text-right"
+                                        value={editFormData.discount}
+                                        onChange={(e) => setEditFormData(prev => ({
+                                          ...prev,
+                                          discount: Number(e.target.value) || 0
+                                        }))}
+                                    />
+                                  </div>
+                                </>
+                            ) : (
+                                <>
+                                  <div className="flex justify-between text-sm">
+                                    <span className="text-muted-foreground">Shipping</span>
+                                    <span>₹{shippingCost.toLocaleString()}</span>
+                                  </div>
+                                  <div className="flex justify-between text-sm">
+                                    <span className="text-muted-foreground">Discount</span>
+                                    <span className="text-green-600">-₹{discount.toLocaleString()}</span>
+                                  </div>
+                                </>
+                            )}
+
+                            <Separator />
+
+                            {/* Grand Total */}
+                            <div className="flex justify-between font-semibold text-lg">
+                              <span>Total</span>
+                              <span>₹{grandTotal.toLocaleString()}</span>
+                            </div>
+                          </>
+                      );
+                    })()}
                   </div>
                 </CardContent>
               </Card>

@@ -248,23 +248,23 @@ export function AddOrderDialog({ open, onOpenChange }: AddOrderDialogProps) {
 
         // Build order payload for backend
         const orderPayload = {
-            // ✅ Include customerId for customer linking
             customerId: selectedCustomerId,
-            products: validItems.map(item => ({
-                productId: item.productId,
-                quantity: item.quantity,
-                price: item.price,
-                taxPercentage: item.taxPercentage, // ✅ Include tax rate per product
-            })),
-            subtotal: calculateSubtotal(),
-            tax: calculateTotalTax(),
-            shippingCost: shippingFee,              // ✅ Include shipping fee
-            discount: calculateDiscountAmount(),    // ✅ Include discount amount (calculated from %)
+            products: validItems.map(item => {
+                // Include tax in the unit price
+                const priceWithTax = item.price * (1 + item.taxPercentage / 100);
+                return {
+                    productId: item.productId,
+                    quantity: item.quantity,
+                    price: Math.round(priceWithTax * 100) / 100,
+                };
+            }),
+            shippingCost: shippingFee,
+            discount: calculateDiscountAmount(),
             totalAmount: calculateTotal(),
             currency: 'INR',
             status: 'PENDING',
             notes: notes || undefined,
-            priority: priority,
+            priority: priority,  // ✅ KEEP THIS
         };
 
         try {
