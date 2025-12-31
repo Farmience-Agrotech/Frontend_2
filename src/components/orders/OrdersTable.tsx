@@ -10,7 +10,7 @@ import {
 } from '@/components/ui/table';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Button } from '@/components/ui/button';
-import { MoreHorizontal, Eye, Edit, Trash2, User, Loader2 } from 'lucide-react';
+import { MoreHorizontal, Eye, Edit, XCircle, User, Loader2 } from 'lucide-react';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -31,6 +31,7 @@ interface OrdersTableProps {
   onSelectOrder: (orderId: string, selected: boolean) => void;
   onSelectAll: (selected: boolean) => void;
   showCheckboxes?: boolean;
+  onCancelOrder?: (orderId: string) => void;
 }
 
 export function OrdersTable({
@@ -38,7 +39,8 @@ export function OrdersTable({
                               selectedOrders,
                               onSelectOrder,
                               onSelectAll,
-                              showCheckboxes = true
+                              showCheckboxes = true,
+                              onCancelOrder
                             }: OrdersTableProps) {
   const navigate = useNavigate();
   const { canEdit, canDelete } = usePermissions();
@@ -273,11 +275,14 @@ export function OrdersTable({
                                         Edit Order
                                       </DropdownMenuItem>
                                   )}
-                                  {showDeleteAction && (
+                                  {showDeleteAction && onCancelOrder && (
                                       <>
                                         <DropdownMenuSeparator />
-                                        <DropdownMenuItem className="text-destructive">
-                                          <Trash2 className="mr-2 h-4 w-4" />
+                                        <DropdownMenuItem
+                                            className="text-destructive"
+                                            onClick={() => onCancelOrder(rowId)}
+                                        >
+                                          <XCircle className="mr-2 h-4 w-4" />
                                           Cancel Order
                                         </DropdownMenuItem>
                                       </>

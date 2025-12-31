@@ -528,6 +528,7 @@ export default function Inventory() {
               products={filteredProducts}
               selectedIds={selectedIds}
               onSelectionChange={setSelectedIds}
+              onDelete={handleDeleteProduct}
               showCheckboxes={canDelete('inventory')}
           />
         </div>

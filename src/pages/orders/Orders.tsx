@@ -85,6 +85,12 @@ export default function Orders() {
   const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
   const [isBulkCancelling, setIsBulkCancelling] = useState(false);
 
+// Handle single order cancel from row menu
+  const handleSingleCancelOrder = (orderId: string) => {
+    setSelectedOrders([orderId]);
+    setCancelDialogOpen(true);
+  };
+
   // ✅ Create product lookup map for fast access
   const productLookup: Record<string, { name: string; sku: string }> = useMemo(() => {
     if (!apiProducts) return {};
@@ -213,7 +219,18 @@ export default function Orders() {
 
   const filteredOrders = useMemo(() => {
     return orders
-        .filter((order) => order.status !== 'cancelled' && order.status !== 'rejected')
+        .filter((order) => {
+          // "All Statuses" shows everything including cancelled
+          if (statusFilter === 'all') {
+            return true;
+          }
+          // "Cancelled" filter shows both cancelled and rejected
+          if (statusFilter === 'cancelled') {
+            return order.status === 'cancelled' || order.status === 'rejected';
+          }
+          // Other filters match exact status
+          return true;
+        })
         .filter((order) => {
       if (searchQuery) {
         const query = searchQuery.toLowerCase();
@@ -419,13 +436,13 @@ export default function Orders() {
                 </div>
               </div>
           )}
-
           <OrdersTable
               orders={filteredOrders}
               selectedOrders={selectedOrders}
               onSelectOrder={handleSelectOrder}
               onSelectAll={handleSelectAll}
               showCheckboxes={canDelete('orders')}
+              onCancelOrder={handleSingleCancelOrder}
           />
 
           <div className="text-sm text-muted-foreground">

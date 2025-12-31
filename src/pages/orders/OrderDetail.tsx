@@ -91,6 +91,75 @@ import type { ApiCustomer } from '@/api/customers.api';
 import type { ApiOrder } from '@/api/orders.api';
 
 // =============================================================================
+// NOTE HELPERS - Format and Parse Notes with Timestamps
+// =============================================================================
+
+interface ParsedNote {
+  timestamp: string;
+  status: string;
+  text: string;
+}
+
+// Format a new note with timestamp and status
+const formatNoteWithTimestamp = (note: string, status: string, existingNotes?: string): string => {
+  if (!note.trim()) return existingNotes || '';
+
+  const timestamp = format(new Date(), 'MMM dd, yyyy hh:mm a');
+  const statusLabel = status.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+  const newNote = `[${timestamp} | ${statusLabel}]\n${note.trim()}`;
+
+  if (existingNotes && existingNotes.trim()) {
+    return `${existingNotes}\n\n${newNote}`;
+  }
+  return newNote;
+};
+
+// Parse notes string into array of structured notes
+const parseNotes = (notesString?: string): ParsedNote[] => {
+  if (!notesString) return [];
+
+  const noteBlocks = notesString.split(/\n\n+/);
+  const parsedNotes: ParsedNote[] = [];
+
+  for (const block of noteBlocks) {
+    const match = block.match(/^\[(.+?)\s*\|\s*(.+?)\]\n?([\s\S]*)/);
+    if (match) {
+      parsedNotes.push({
+        timestamp: match[1].trim(),
+        status: match[2].trim(),
+        text: match[3].trim(),
+      });
+    } else if (block.trim()) {
+      // Legacy note without timestamp
+      parsedNotes.push({
+        timestamp: 'Unknown date',
+        status: 'Note',
+        text: block.trim(),
+      });
+    }
+  }
+
+  return parsedNotes;
+};
+
+// Get status color for note badge
+const getNoteStatusColor = (status: string): string => {
+  const statusLower = status.toLowerCase().replace(/\s/g, '_');
+  const colors: Record<string, string> = {
+    'quote_requested': 'bg-orange-100 text-orange-800 border-orange-200',
+    'quote_sent': 'bg-cyan-100 text-cyan-800 border-cyan-200',
+    'negotiation': 'bg-purple-100 text-purple-800 border-purple-200',
+    'order_booked': 'bg-emerald-100 text-emerald-800 border-emerald-200',
+    'processing': 'bg-blue-100 text-blue-800 border-blue-200',
+    'shipped': 'bg-indigo-100 text-indigo-800 border-indigo-200',
+    'delivered': 'bg-green-100 text-green-800 border-green-200',
+    'cancelled': 'bg-red-100 text-red-800 border-red-200',
+    'rejected': 'bg-red-100 text-red-800 border-red-200',
+  };
+  return colors[statusLower] || 'bg-gray-100 text-gray-800 border-gray-200';
+};
+
+// =============================================================================
 // STATUS MAPPING - FIXED!
 // =============================================================================
 
@@ -424,10 +493,15 @@ export default function OrderDetail() {
         quotedPrice: quotedPrices[item.productId] || item.price,
       }));
 
+      // Append note with timestamp
+      const updatedNotes = quoteNotes
+          ? formatNoteWithTimestamp(quoteNotes, 'Quote Sent', apiOrder.notes)
+          : apiOrder.notes;
+
       await sendQuoteMutation.mutateAsync({
         quotationId: apiOrder._id,
         products,
-        notes: quoteNotes || undefined,
+        notes: updatedNotes || undefined,
       });
 
       setShowSendQuoteDialog(false);
@@ -510,10 +584,15 @@ export default function OrderDetail() {
     if (!apiOrder) return;
 
     try {
+      // Append note with timestamp
+      const updatedNotes = transitionNote
+          ? formatNoteWithTimestamp(transitionNote, 'Processing', apiOrder.notes)
+          : apiOrder.notes;
+
       await updateStatusMutation.mutateAsync({
         orderId: apiOrder.orderId || apiOrder._id,
         newStatus: 'processing',
-        note: transitionNote || undefined,
+        note: updatedNotes || undefined,
       });
 
       toast({
@@ -539,10 +618,15 @@ export default function OrderDetail() {
     if (!apiOrder) return;
 
     try {
+      // Append note with timestamp
+      const updatedNotes = transitionNote
+          ? formatNoteWithTimestamp(transitionNote, 'Shipped', apiOrder.notes)
+          : apiOrder.notes;
+
       await updateStatusMutation.mutateAsync({
         orderId: apiOrder.orderId || apiOrder._id,
         newStatus: 'shipped',
-        note: transitionNote || undefined,
+        note: updatedNotes || undefined,
       });
 
       toast({
@@ -568,10 +652,15 @@ export default function OrderDetail() {
     if (!apiOrder) return;
 
     try {
+      // Append note with timestamp
+      const updatedNotes = transitionNote
+          ? formatNoteWithTimestamp(transitionNote, 'Delivered', apiOrder.notes)
+          : apiOrder.notes;
+
       await updateStatusMutation.mutateAsync({
         orderId: apiOrder.orderId || apiOrder._id,
         newStatus: 'delivered',
-        note: transitionNote || undefined,
+        note: updatedNotes || undefined,
       });
 
       toast({
@@ -1402,25 +1491,48 @@ export default function OrderDetail() {
               </Card>
 
               {/* Notes Section */}
-              {(apiOrder.notes || isEditMode) && (
-                  <Card>
-                    <CardHeader>
-                      <CardTitle className="text-lg">Notes</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      {isEditMode ? (
-                          <Textarea
-                              value={editFormData.notes}
-                              onChange={(e) => setEditFormData(prev => ({ ...prev, notes: e.target.value }))}
-                              placeholder="Add notes..."
-                              rows={4}
-                          />
-                      ) : (
-                          <p className="text-muted-foreground">{apiOrder.notes || 'No notes'}</p>
-                      )}
-                    </CardContent>
-                  </Card>
-              )}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-lg flex items-center gap-2">
+                    <MessageSquare className="h-5 w-5" />
+                    Notes History
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  {isEditMode ? (
+                      <Textarea
+                          value={editFormData.notes}
+                          onChange={(e) => setEditFormData(prev => ({ ...prev, notes: e.target.value }))}
+                          placeholder="Add notes..."
+                          rows={4}
+                      />
+                  ) : (
+                      <div className="space-y-4">
+                        {parseNotes(apiOrder.notes).length > 0 ? (
+                            parseNotes(apiOrder.notes).map((note, index) => (
+                                <div key={index} className="border rounded-lg p-3 bg-muted/30">
+                                  <div className="flex items-center justify-between mb-2">
+                      <span className={cn(
+                          'inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border',
+                          getNoteStatusColor(note.status)
+                      )}>
+                        {note.status}
+                      </span>
+                                    <span className="text-xs text-muted-foreground flex items-center gap-1">
+                        <Clock className="h-3 w-3" />
+                                      {note.timestamp}
+                      </span>
+                                  </div>
+                                  <p className="text-sm text-foreground">{note.text}</p>
+                                </div>
+                            ))
+                        ) : (
+                            <p className="text-muted-foreground text-sm">No notes yet</p>
+                        )}
+                      </div>
+                  )}
+                </CardContent>
+              </Card>
 
               {/* Invoices Section - Auto-generated based on status */}
               {invoices.length > 0 && (

@@ -769,15 +769,11 @@ export const getOrder = async (id: string): Promise<ApiOrder> => {
 };
 
 /**
- * Delete order
+ * Delete order - DISABLED
+ * Use cancel order instead to change status without removing data
  */
-export const deleteOrder = async (id: string): Promise<void> => {
-    try {
-        await apiClient.delete(`/orders/delete/${id}`);
-    } catch (error) {
-        console.error('Error deleting order:', error);
-        throw error;
-    }
+export const deleteOrder = async (_id: string): Promise<void> => {
+    throw new Error('Delete order is disabled. Use cancel order instead.');
 };
 
 /**
