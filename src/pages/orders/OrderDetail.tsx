@@ -3,6 +3,7 @@
 // =============================================================================
 
 import { useState, useMemo, useRef, useEffect } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { OrderStatusBadge } from '@/components/orders/OrderStatusBadge';
@@ -141,6 +142,7 @@ export default function OrderDetail() {
   const navigate = useNavigate();
   const { canEdit } = usePermissions();
   const { toast } = useToast();
+  const queryClient = useQueryClient();
 
   // Data fetching
   const { data: apiOrders, isLoading: ordersLoading, error, refetch } = useOrders();
@@ -165,6 +167,7 @@ export default function OrderDetail() {
   const [showShippedDialog, setShowShippedDialog] = useState(false);
   const [showDeliveredDialog, setShowDeliveredDialog] = useState(false);
   const [transitionNote, setTransitionNote] = useState('');
+  const [showCancelDialog, setShowCancelDialog] = useState(false);
 
   // Confirmation dialogs
   const [showAcceptDialog, setShowAcceptDialog] = useState(false);
@@ -589,6 +592,50 @@ export default function OrderDetail() {
     }
   };
 
+  const handleConfirmCancel = async () => {
+    if (!apiOrder) return;
+
+    try {
+      // Check if it's a quotation
+      const isQuotation = apiOrder.isQuotation ||
+          apiOrder.orderNumber?.startsWith('QUO') ||
+          apiOrder.orderId?.startsWith('QUO');
+
+      if (isQuotation) {
+        // Use updateQuotation for quotations
+        await updateQuotationMutation.mutateAsync({
+          quotationId: apiOrder._id,
+          data: { status: 'REJECTED' },
+        });
+      } else {
+        // Use updateOrderStatus for regular orders
+        await updateStatusMutation.mutateAsync({
+          orderId: apiOrder.orderId || apiOrder._id,
+          newStatus: 'cancelled',
+        });
+      }
+
+      // Invalidate queries to refresh data on Orders page
+      await queryClient.invalidateQueries({ queryKey: ['orders'] });
+      await queryClient.invalidateQueries({ queryKey: ['quotations'] });
+
+      toast({
+        title: 'Order Cancelled',
+        description: `Order ${apiOrder.orderNumber || apiOrder.orderId} has been cancelled.`,
+      });
+
+      setShowCancelDialog(false);
+      navigate('/orders');
+    } catch (error) {
+      console.error('Failed to cancel order:', error);
+      toast({
+        title: 'Error',
+        description: 'Failed to cancel order. Please try again.',
+        variant: 'destructive',
+      });
+    }
+  };
+
 
   // Initialize edit form
   const initializeEditForm = () => {
@@ -884,6 +931,17 @@ export default function OrderDetail() {
                   >
                     <Edit className="h-4 w-4 mr-2" />
                     Edit Order
+                  </Button>
+              )}
+
+              {frontendStatus !== 'cancelled' && (
+                  <Button
+                      variant="destructive"
+                      size="sm"
+                      onClick={() => setShowCancelDialog(true)}
+                  >
+                    <XCircle className="h-4 w-4 mr-2" />
+                    Cancel Order
                   </Button>
               )}
 
@@ -1878,6 +1936,52 @@ export default function OrderDetail() {
                 )}
                 <Check className="h-4 w-4 mr-2" />
                 Confirm Delivery
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Cancel Order Confirmation Dialog */}
+        <Dialog open={showCancelDialog} onOpenChange={setShowCancelDialog}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <AlertCircle className="h-5 w-5 text-destructive" />
+                Cancel Order
+              </DialogTitle>
+              <DialogDescription>
+                Are you sure you want to cancel this order? This action cannot be undone.
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="py-4">
+              <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+                <p className="text-sm text-red-700">
+                  <strong>Order:</strong> {order.orderNumber}
+                </p>
+                <p className="text-sm text-red-700">
+                  <strong>Customer:</strong> {order.customer?.name}
+                </p>
+                <p className="text-sm text-red-700">
+                  <strong>Total Value:</strong> ₹{order.totalAmount?.toLocaleString()}
+                </p>
+              </div>
+            </div>
+
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setShowCancelDialog(false)}>
+                Keep Order
+              </Button>
+              <Button
+                  variant="destructive"
+                  onClick={handleConfirmCancel}
+                  disabled={updateStatusMutation.isPending}
+              >
+                {updateStatusMutation.isPending && (
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                )}
+                <XCircle className="h-4 w-4 mr-2" />
+                Cancel Order
               </Button>
             </DialogFooter>
           </DialogContent>

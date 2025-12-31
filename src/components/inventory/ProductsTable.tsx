@@ -25,8 +25,8 @@ interface ProductsTableProps {
   products: Product[];
   selectedIds: string[];
   onSelectionChange: (ids: string[]) => void;
-  onEdit: (product: Product) => void;
-  onDelete: (id: string) => void;
+  onEdit?: (product: Product) => void;
+  onDelete?: (id: string) => void;
   showCheckboxes?: boolean;
 }
 
@@ -161,7 +161,7 @@ export function ProductsTable({
                                   </DropdownMenuItem>
                                   {showEditAction && (
                                       <>
-                                        <DropdownMenuItem onClick={() => onEdit(product)}>
+                                        <DropdownMenuItem onClick={() => onEdit?.(product)}>
                                           <Edit className="mr-2 h-4 w-4" />
                                           Edit
                                         </DropdownMenuItem>
@@ -176,7 +176,7 @@ export function ProductsTable({
                                         <DropdownMenuSeparator />
                                         <DropdownMenuItem
                                             className="text-destructive"
-                                            onClick={() => onDelete(product.id)}
+                                            onClick={() => onDelete?.(product.id)}
                                         >
                                           <Trash2 className="mr-2 h-4 w-4" />
                                           Delete

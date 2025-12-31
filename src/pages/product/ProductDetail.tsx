@@ -1,13 +1,26 @@
+import { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Edit, Package, AlertTriangle, ImageIcon, Loader2, Layers } from 'lucide-react';
+import { ArrowLeft, Edit, Package, AlertTriangle, ImageIcon, Loader2, Layers, Trash2 } from 'lucide-react';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { StockBadge } from '@/components/inventory/StockBadge';
-import { useProduct, useInventory, useTemplates } from '@/hooks/useApi';
+import { useProduct, useInventory, useTemplates, useDeleteProduct } from '@/hooks/useApi';
 import { usePermissions } from '@/hooks/usePermissions';
+
+
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 
 // localStorage key for images (until backend supports images)
 const IMAGES_DATA_KEY = 'bulkflow_product_images';
@@ -25,12 +38,15 @@ const loadImagesData = (): Record<string, { images?: string[] }> => {
 export default function ProductDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { canEdit } = usePermissions();
+  const { canEdit, canDelete } = usePermissions();
 
   // API Data
   const { data: apiProduct, isLoading: productLoading } = useProduct(id);
   const { data: apiInventory, isLoading: inventoryLoading } = useInventory();
   const { data: apiTemplates, isLoading: templatesLoading } = useTemplates();
+  // Delete mutation and state
+  const deleteProductMutation = useDeleteProduct();
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
 
   // Find inventory entry for this product
   const inventoryEntry = apiInventory?.find((inv) => inv.product === id);
@@ -38,6 +54,24 @@ export default function ProductDetail() {
   // Get images from localStorage (until backend supports images)
   const imagesData = loadImagesData();
   const productImages = id ? imagesData[id]?.images || [] : [];
+
+  // Handle delete product
+  const handleDelete = async () => {
+    if (!id) return;
+
+    try {
+      await deleteProductMutation.mutateAsync(id);
+      // Clean up localStorage images
+      const currentImagesData = loadImagesData();
+      if (currentImagesData[id]) {
+        delete currentImagesData[id];
+        localStorage.setItem(IMAGES_DATA_KEY, JSON.stringify(currentImagesData));
+      }
+      navigate('/inventory');
+    } catch {
+      // Error handled by hook
+    }
+  };
 
   // Loading state
   if (productLoading || inventoryLoading || templatesLoading) {
@@ -180,12 +214,28 @@ export default function ProductDetail() {
               </div>
               <p className="text-muted-foreground font-mono">{productSku}</p>
             </div>
-            {canEdit('inventory') && (
-                <Button onClick={() => navigate('/inventory')}>
-                  <Edit className="mr-2 h-4 w-4" />
-                  Edit Product
-                </Button>
-            )}
+            <div className="flex gap-2">
+              {canEdit('inventory') && (
+                  <Button variant="outline" onClick={() => navigate('/inventory')}>
+                    <Edit className="mr-2 h-4 w-4" />
+                    Edit Product
+                  </Button>
+              )}
+              {canDelete('inventory') && (
+                  <Button
+                      variant="destructive"
+                      onClick={() => setDeleteDialogOpen(true)}
+                      disabled={deleteProductMutation.isPending}
+                  >
+                    {deleteProductMutation.isPending ? (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : (
+                        <Trash2 className="mr-2 h-4 w-4" />
+                    )}
+                    Delete
+                  </Button>
+              )}
+            </div>
           </div>
 
           {/* Main Content */}
@@ -421,6 +471,40 @@ export default function ProductDetail() {
             </div>
           </div>
         </div>
+
+        {/* Delete Confirmation Dialog */}
+        <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Delete Product</AlertDialogTitle>
+              <AlertDialogDescription>
+                Are you sure you want to delete "{productName}"? This action cannot be undone and will remove all associated data.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={deleteProductMutation.isPending}>
+                Cancel
+              </AlertDialogCancel>
+              <AlertDialogAction
+                  onClick={handleDelete}
+                  className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                  disabled={deleteProductMutation.isPending}
+              >
+                {deleteProductMutation.isPending ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Deleting...
+                    </>
+                ) : (
+                    <>
+                      <Trash2 className="mr-2 h-4 w-4" />
+                      Delete Product
+                    </>
+                )}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </DashboardLayout>
   );
 }

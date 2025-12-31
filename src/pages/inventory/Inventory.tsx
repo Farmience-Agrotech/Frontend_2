@@ -29,6 +29,8 @@ import {
   useTemplates,
   useCreateTemplate,
   useDeleteTemplate,
+  useDeleteProduct,
+  useDeleteMultipleProducts,
 } from '@/hooks/useApi';
 
 // Default predefined categories
@@ -91,6 +93,9 @@ export default function Inventory() {
   const createInventoryMutation = useCreateInventory();
   const createTemplateMutation = useCreateTemplate();
   const deleteTemplateMutation = useDeleteTemplate();
+  // Delete mutations
+  const deleteProductMutation = useDeleteProduct();
+  const deleteMultipleProductsMutation = useDeleteMultipleProducts();
 
   // Local state
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
@@ -107,6 +112,7 @@ export default function Inventory() {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [bulkDeleteDialogOpen, setBulkDeleteDialogOpen] = useState(false);
 
   // Template creation flow
   const [startTemplateInCreateMode, setStartTemplateInCreateMode] = useState(false);
@@ -306,22 +312,45 @@ export default function Inventory() {
     setDeleteDialogOpen(true);
   };
 
-  const confirmDelete = () => {
+  const confirmDelete = async () => {
     if (deletingId) {
-      // Remove images data
-      const updatedImages = { ...imagesData };
-      delete updatedImages[deletingId];
-      setImagesData(updatedImages);
-      saveImagesData(updatedImages);
+      try {
+        await deleteProductMutation.mutateAsync(deletingId);
+        // Remove images data from localStorage
+        const updatedImages = { ...imagesData };
+        delete updatedImages[deletingId];
+        setImagesData(updatedImages);
+        saveImagesData(updatedImages);
+      } catch {
+        // Error handled by hook
+      }
     }
-    toast.info('Delete functionality coming soon');
     setDeleteDialogOpen(false);
     setDeletingId(null);
   };
 
   const handleBulkDelete = () => {
-    toast.info('Bulk delete functionality coming soon');
-    setSelectedIds([]);
+    if (selectedIds.length === 0) return;
+    setBulkDeleteDialogOpen(true);
+  };
+
+  const confirmBulkDelete = async () => {
+    if (selectedIds.length === 0) return;
+
+    try {
+      await deleteMultipleProductsMutation.mutateAsync(selectedIds);
+      // Remove images data from localStorage for all deleted products
+      const updatedImages = { ...imagesData };
+      selectedIds.forEach(id => {
+        delete updatedImages[id];
+      });
+      setImagesData(updatedImages);
+      saveImagesData(updatedImages);
+      setSelectedIds([]);
+    } catch {
+      // Error handled by hook
+    }
+    setBulkDeleteDialogOpen(false);
   };
 
   // Template handlers - now using API
@@ -458,11 +487,39 @@ export default function Inventory() {
               onClearFilters={clearFilters}
           />
 
-          {canDelete('inventory') && selectedIds.length > 0 && (
+          {selectedIds.length > 0 && (
               <div className="flex items-center gap-3 p-3 bg-muted/50 rounded-lg">
                 <span className="text-sm font-medium">{selectedIds.length} selected</span>
-                <Button variant="destructive" size="sm" onClick={handleBulkDelete}>
-                  <Trash2 className="mr-2 h-4 w-4" />Delete Selected
+
+                {/* DELETE Button */}
+                {canDelete('inventory') && (
+                    <Button
+                        variant="destructive"
+                        size="sm"
+                        onClick={handleBulkDelete}
+                        disabled={deleteMultipleProductsMutation.isPending}
+                    >
+                      {deleteMultipleProductsMutation.isPending ? (
+                          <>
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            Deleting...
+                          </>
+                      ) : (
+                          <>
+                            <Trash2 className="mr-2 h-4 w-4" />
+                            Delete Selected
+                          </>
+                      )}
+                    </Button>
+                )}
+
+                {/* Clear Selection Button */}
+                <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setSelectedIds([])}
+                >
+                  Clear Selection
                 </Button>
               </div>
           )}
@@ -471,8 +528,6 @@ export default function Inventory() {
               products={filteredProducts}
               selectedIds={selectedIds}
               onSelectionChange={setSelectedIds}
-              onEdit={handleEditProduct}
-              onDelete={handleDeleteProduct}
               showCheckboxes={canDelete('inventory')}
           />
         </div>
@@ -508,15 +563,70 @@ export default function Inventory() {
             onUpload={handleBulkUpload}
         />
 
+        {/* Single Delete Confirmation Dialog */}
         <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
           <AlertDialogContent>
             <AlertDialogHeader>
               <AlertDialogTitle>Delete Product</AlertDialogTitle>
-              <AlertDialogDescription>Are you sure you want to delete this product? This action cannot be undone.</AlertDialogDescription>
+              <AlertDialogDescription>
+                Are you sure you want to delete this product? This action cannot be undone.
+              </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
-              <AlertDialogCancel>Cancel</AlertDialogCancel>
-              <AlertDialogAction onClick={confirmDelete} className="bg-destructive text-destructive-foreground">Delete</AlertDialogAction>
+              <AlertDialogCancel disabled={deleteProductMutation.isPending}>
+                Cancel
+              </AlertDialogCancel>
+              <AlertDialogAction
+                  onClick={confirmDelete}
+                  className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                  disabled={deleteProductMutation.isPending}
+              >
+                {deleteProductMutation.isPending ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Deleting...
+                    </>
+                ) : (
+                    'Delete'
+                )}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+
+        {/* Bulk Delete Confirmation Dialog */}
+        <AlertDialog open={bulkDeleteDialogOpen} onOpenChange={setBulkDeleteDialogOpen}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>
+                Delete {selectedIds.length} Product{selectedIds.length > 1 ? 's' : ''}?
+              </AlertDialogTitle>
+              <AlertDialogDescription>
+                Are you sure you want to delete {selectedIds.length} selected product{selectedIds.length > 1 ? 's' : ''}?
+                This action cannot be undone and will permanently remove all selected products and their associated data.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={deleteMultipleProductsMutation.isPending}>
+                Cancel
+              </AlertDialogCancel>
+              <AlertDialogAction
+                  onClick={confirmBulkDelete}
+                  className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                  disabled={deleteMultipleProductsMutation.isPending}
+              >
+                {deleteMultipleProductsMutation.isPending ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Deleting {selectedIds.length} product{selectedIds.length > 1 ? 's' : ''}...
+                    </>
+                ) : (
+                    <>
+                      <Trash2 className="mr-2 h-4 w-4" />
+                      Delete {selectedIds.length} Product{selectedIds.length > 1 ? 's' : ''}
+                    </>
+                )}
+              </AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>

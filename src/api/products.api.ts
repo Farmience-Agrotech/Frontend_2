@@ -24,12 +24,30 @@ export const createProduct = async (data: CreateProductRequest): Promise<Product
 };
 
 // -----------------------------------------------------------------------------
+// DELETE PRODUCT
+// -----------------------------------------------------------------------------
+
+export const deleteProduct = async (id: string): Promise<void> => {
+    await apiClient.delete(`/products/delete/${id}`);
+};
+
+// -----------------------------------------------------------------------------
+// DELETE MULTIPLE PRODUCTS
+// -----------------------------------------------------------------------------
+
+export const deleteMultipleProducts = async (ids: string[]): Promise<void> => {
+    await Promise.all(ids.map(id => apiClient.delete(`/products/delete/${id}`)));
+};
+
+// -----------------------------------------------------------------------------
 // EXPORT ALL
 // -----------------------------------------------------------------------------
 
 const productsApi = {
     list: listProducts,
     create: createProduct,
+    delete: deleteProduct,
+    deleteBulk: deleteMultipleProducts,
 };
 
 export default productsApi;

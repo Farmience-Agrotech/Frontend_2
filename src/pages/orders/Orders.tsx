@@ -6,13 +6,23 @@ import { OrderStats } from '@/components/orders/OrderStats.tsx';
 import { AddOrderDialog } from '@/components/orders/AddOrderDialog';
 import { Order, OrderStatus } from '@/types/order.ts';
 import { Button } from '@/components/ui/button.tsx';
-import { Plus, Download, RefreshCw, Loader2 } from 'lucide-react';
+import { Plus, Download, RefreshCw, Loader2, XCircle, AlertCircle } from 'lucide-react';
 import { DateRange } from 'react-day-picker';
 import { isWithinInterval } from 'date-fns';
 import { usePermissions } from '@/hooks/usePermissions.ts';
+import { useToast } from '@/hooks/use-toast';
+
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 
 // ✅ Import API hooks - now includes useProducts
-import { useOrders, useProducts } from '@/hooks/useApi';
+import { useOrders, useProducts, useUpdateOrderStatus, useUpdateQuotation } from '@/hooks/useApi';
 
 // =============================================================================
 // STATUS MAPPING - EC2 (uppercase) → Frontend (lowercase)
@@ -39,6 +49,7 @@ const mapApiStatusToFrontend = (apiStatus: string): OrderStatus => {
     'returned': 'returned',
     'refunded': 'refunded',
     'on_hold': 'on_hold',
+    'rejected': 'rejected',
   };
 
   return statusMap[apiStatus] || 'processing';
@@ -57,10 +68,13 @@ const mapPaymentStatus = (apiStatus: string): 'pending' | 'partial' | 'paid' | '
 
 export default function Orders() {
   const { canCreate, canEdit, canDelete } = usePermissions();
+  const { toast } = useToast();
 
   // ✅ Fetch orders AND products from API
   const { data: apiOrders, isLoading: ordersLoading, error: ordersError, refetch } = useOrders();
   const { data: apiProducts, isLoading: productsLoading } = useProducts();
+  const updateStatusMutation = useUpdateOrderStatus();
+  const updateQuotationMutation = useUpdateQuotation();
 
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<OrderStatus | 'all'>('all');
@@ -68,6 +82,8 @@ export default function Orders() {
   const [amountFilter, setAmountFilter] = useState('all');
   const [selectedOrders, setSelectedOrders] = useState<string[]>([]);
   const [addOrderDialogOpen, setAddOrderDialogOpen] = useState(false);
+  const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
+  const [isBulkCancelling, setIsBulkCancelling] = useState(false);
 
   // ✅ Create product lookup map for fast access
   const productLookup: Record<string, { name: string; sku: string }> = useMemo(() => {
@@ -172,26 +188,33 @@ export default function Orders() {
 
   // ✅ Calculate stats
   const stats = useMemo(() => {
-    const total = orders.length;
-    const pending = orders.filter(o =>
-        ['quote_requested', 'quote_sent', 'confirmed', 'payment_pending'].includes(o.status)
+    // Filter out cancelled and rejected orders for all stats
+    const activeOrders = orders.filter(o =>
+        !['cancelled', 'rejected'].includes(o.status)
+    );
+
+    const total = activeOrders.length;
+    const pending = activeOrders.filter(o =>
+        ['quote_requested', 'quote_sent', 'negotiation', 'confirmed', 'payment_pending'].includes(o.status)
     ).length;
-    const processing = orders.filter(o =>
-        ['processing', 'packed'].includes(o.status)
+    const processing = activeOrders.filter(o =>
+        ['processing', 'packed', 'order_booked', 'paid'].includes(o.status)
     ).length;
-    const shipped = orders.filter(o => o.status === 'shipped').length;
-    const completed = orders.filter(o =>
+    const shipped = activeOrders.filter(o => o.status === 'shipped').length;
+    const completed = activeOrders.filter(o =>
         ['delivered', 'completed'].includes(o.status)
     ).length;
-    const totalValue = orders
-        .filter(o => !['cancelled', 'returned', 'refunded'].includes(o.status))
+    const totalValue = activeOrders
+        .filter(o => !['returned', 'refunded'].includes(o.status))
         .reduce((sum, o) => sum + o.totalAmount, 0);
 
     return { total, pending, processing, shipped, completed, totalValue };
   }, [orders]);
 
   const filteredOrders = useMemo(() => {
-    return orders.filter((order) => {
+    return orders
+        .filter((order) => order.status !== 'cancelled' && order.status !== 'rejected')
+        .filter((order) => {
       if (searchQuery) {
         const query = searchQuery.toLowerCase();
         const matchesSearch =
@@ -245,6 +268,58 @@ export default function Orders() {
       setSelectedOrders(filteredOrders.map((order) => order.id));
     } else {
       setSelectedOrders([]);
+    }
+  };
+
+  const handleBulkCancel = async () => {
+    if (selectedOrders.length === 0) return;
+
+    setIsBulkCancelling(true);
+
+    try {
+      const ordersToCancel = filteredOrders.filter(order =>
+          selectedOrders.includes(order.id)
+      );
+
+      await Promise.all(
+          ordersToCancel.map(order => {
+            // Check if it's a quotation (orderNumber starts with "QUO")
+            const isQuotation = order.orderNumber?.startsWith('QUO') ||
+                order.orderId?.startsWith('QUO');
+
+            if (isQuotation) {
+              // Use updateQuotation for quotations
+              return updateQuotationMutation.mutateAsync({
+                quotationId: order.id,
+                data: { status: 'REJECTED' },
+              });
+            } else {
+              // Use updateOrderStatus for regular orders
+              return updateStatusMutation.mutateAsync({
+                orderId: order.orderNumber || order.orderId || order.id,
+                newStatus: 'cancelled',
+              });
+            }
+          })
+      );
+
+      toast({
+        title: selectedOrders.length > 1 ? 'Orders Cancelled' : 'Order Cancelled',
+        description: `Successfully cancelled ${selectedOrders.length} order${selectedOrders.length > 1 ? 's' : ''}.`,
+      });
+
+      setSelectedOrders([]);
+      setCancelDialogOpen(false);
+      refetch();
+    } catch (error) {
+      console.error('Failed to cancel orders:', error);
+      toast({
+        title: 'Error',
+        description: 'Failed to cancel order(s). Please try again.',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsBulkCancelling(false);
     }
   };
 
@@ -320,14 +395,24 @@ export default function Orders() {
 
           {selectedOrders.length > 0 && (
               <div className="flex items-center gap-4 p-3 bg-primary/5 rounded-lg border border-primary/20">
-            <span className="text-sm font-medium">
-              {selectedOrders.length} order{selectedOrders.length > 1 ? 's' : ''} selected
-            </span>
+      <span className="text-sm font-medium">
+        {selectedOrders.length} order{selectedOrders.length > 1 ? 's' : ''} selected
+      </span>
                 <div className="flex items-center gap-2">
                   {canEdit('orders') && (
                       <Button variant="outline" size="sm">Update Status</Button>
                   )}
                   <Button variant="outline" size="sm">Export Selected</Button>
+                  {canDelete('orders') && (
+                      <Button
+                          variant="destructive"
+                          size="sm"
+                          onClick={() => setCancelDialogOpen(true)}
+                      >
+                        <XCircle className="mr-2 h-4 w-4" />
+                        Cancel Order{selectedOrders.length > 1 ? 's' : ''}
+                      </Button>
+                  )}
                   <Button variant="ghost" size="sm" onClick={() => setSelectedOrders([])}>
                     Clear Selection
                   </Button>
@@ -352,6 +437,59 @@ export default function Orders() {
             open={addOrderDialogOpen}
             onOpenChange={setAddOrderDialogOpen}
         />
+
+        {/* Cancel Order Confirmation Dialog */}
+        <Dialog open={cancelDialogOpen} onOpenChange={setCancelDialogOpen}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <AlertCircle className="h-5 w-5 text-destructive" />
+                Cancel Order{selectedOrders.length > 1 ? 's' : ''}
+              </DialogTitle>
+              <DialogDescription>
+                Are you sure you want to cancel {selectedOrders.length} order{selectedOrders.length > 1 ? 's' : ''}?
+                This action cannot be undone.
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="py-4">
+              <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+                <p className="text-sm text-red-700">
+                  <strong>Orders to cancel:</strong> {selectedOrders.length}
+                </p>
+                <p className="text-sm text-red-700 mt-1">
+                  <strong>Order ID{selectedOrders.length > 1 ? 's' : ''}:</strong>{' '}
+                  {filteredOrders
+                      .filter(order => selectedOrders.includes(order.id))
+                      .map(order => order.orderNumber || order.orderId)
+                      .slice(0, 5)
+                      .join(', ')}
+                  {selectedOrders.length > 5 && ` and ${selectedOrders.length - 5} more...`}
+                </p>
+              </div>
+            </div>
+
+            <DialogFooter>
+              <Button
+                  variant="outline"
+                  onClick={() => setCancelDialogOpen(false)}
+                  disabled={isBulkCancelling}
+              >
+                Keep Order{selectedOrders.length > 1 ? 's' : ''}
+              </Button>
+              <Button
+                  variant="destructive"
+                  onClick={handleBulkCancel}
+                  disabled={isBulkCancelling}
+              >
+                {isBulkCancelling && (
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                )}
+                Cancel Order{selectedOrders.length > 1 ? 's' : ''}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </DashboardLayout>
   );
 }

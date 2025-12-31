@@ -146,6 +146,62 @@ export function useCreateProduct() {
     });
 }
 
+// -----------------------------------------------------------------------------
+// DELETE PRODUCT
+// -----------------------------------------------------------------------------
+
+export function useDeleteProduct() {
+    const queryClient = useQueryClient();
+    const { toast } = useToast();
+
+    return useMutation({
+        mutationFn: (id: string) => productsApi.delete(id),
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: queryKeys.products });
+            queryClient.invalidateQueries({ queryKey: queryKeys.inventory });
+            toast({
+                title: 'Product Deleted',
+                description: 'Product has been removed from inventory',
+            });
+        },
+        onError: (error: Error) => {
+            toast({
+                title: 'Failed to Delete Product',
+                description: error.message,
+                variant: 'destructive',
+            });
+        },
+    });
+}
+
+// -----------------------------------------------------------------------------
+// DELETE MULTIPLE PRODUCTS
+// -----------------------------------------------------------------------------
+
+export function useDeleteMultipleProducts() {
+    const queryClient = useQueryClient();
+    const { toast } = useToast();
+
+    return useMutation({
+        mutationFn: (ids: string[]) => productsApi.deleteBulk(ids),
+        onSuccess: (_, ids) => {
+            queryClient.invalidateQueries({ queryKey: queryKeys.products });
+            queryClient.invalidateQueries({ queryKey: queryKeys.inventory });
+            toast({
+                title: 'Products Deleted',
+                description: `${ids.length} product(s) have been removed`,
+            });
+        },
+        onError: (error: Error) => {
+            toast({
+                title: 'Failed to Delete Products',
+                description: error.message,
+                variant: 'destructive',
+            });
+        },
+    });
+}
+
 // =============================================================================
 // ORDER HOOKS
 // =============================================================================
