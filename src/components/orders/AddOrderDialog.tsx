@@ -318,11 +318,12 @@ export function AddOrderDialog({ open, onOpenChange }: AddOrderDialogProps) {
         }
     };
 
-    const formatCurrency = (amount: number) => {
+    const formatCurrency = (amount: number, showDecimals: boolean = false) => {
         return new Intl.NumberFormat('en-IN', {
             style: 'currency',
             currency: 'INR',
-            maximumFractionDigits: 0,
+            minimumFractionDigits: showDecimals ? 2 : 0,
+            maximumFractionDigits: showDecimals ? 2 : 0,
         }).format(amount);
     };
 
@@ -607,7 +608,7 @@ export function AddOrderDialog({ open, onOpenChange }: AddOrderDialogProps) {
                                                     <div className="space-y-2">
                                                         <Label>Tax ({item.taxPercentage}%)</Label>
                                                         <div className="h-10 px-3 py-2 bg-muted rounded-md flex items-center text-sm text-muted-foreground">
-                                                            {formatCurrency(lineTax)}
+                                                            {formatCurrency(lineTax, true)}
                                                         </div>
                                                     </div>
                                                     <div className="space-y-2">
@@ -683,7 +684,7 @@ export function AddOrderDialog({ open, onOpenChange }: AddOrderDialogProps) {
                         {/* Total Tax */}
                         <div className="flex justify-between text-sm items-center">
                             <span>Total Tax</span>
-                            <span>{formatCurrency(calculateTotalTax())}</span>
+                            <span>{formatCurrency(calculateTotalTax(), true)}</span>
                         </div>
 
                         {/* ✅ Editable Shipping Fee */}
