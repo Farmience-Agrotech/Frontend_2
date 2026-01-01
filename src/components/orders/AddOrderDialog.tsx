@@ -71,7 +71,7 @@ export function AddOrderDialog({ open, onOpenChange }: AddOrderDialogProps) {
     };
 
     const [orderItems, setOrderItems] = useState<OrderItem[]>([
-        { id: `item-${Date.now()}`, productId: '', quantity: 1, price: 0, taxPercentage: 18, popoverOpen: false }
+        { id: `item-${Date.now()}`, productId: '', quantity: 0, price: 0, taxPercentage: 18, popoverOpen: false }
     ]);
 
 // Check if any selected product has zero stock (MUST be after orderItems)
@@ -151,7 +151,7 @@ export function AddOrderDialog({ open, onOpenChange }: AddOrderDialogProps) {
     const addOrderItem = () => {
         setOrderItems(prev => [
             ...prev,
-            { id: `item-${Date.now()}`, productId: '', quantity: 1, price: 0, taxPercentage: 18, popoverOpen: false }
+            { id: `item-${Date.now()}`, productId: '', quantity: 0, price: 0, taxPercentage: 18, popoverOpen: false }
         ]);
     };
 
@@ -303,7 +303,7 @@ export function AddOrderDialog({ open, onOpenChange }: AddOrderDialogProps) {
             });
             // Reset form
             setSelectedCustomerId('');
-            setOrderItems([{ id: `item-${Date.now()}`, productId: '', quantity: 1, price: 0, taxPercentage: 18, popoverOpen: false }]);
+            setOrderItems([{ id: `item-${Date.now()}`, productId: '', quantity: 0, price: 0, taxPercentage: 18, popoverOpen: false }]);
             setNotes('');
             setPriority('medium');
             setDiscountPercent(0);   // ✅ Reset discount percentage
@@ -590,9 +590,9 @@ export function AddOrderDialog({ open, onOpenChange }: AddOrderDialogProps) {
                                                         <Label>Quantity *</Label>
                                                         <Input
                                                             type="number"
-                                                            min="1"
+                                                            min="0"
                                                             value={item.quantity}
-                                                            onChange={(e) => updateOrderItem(item.id, 'quantity', parseInt(e.target.value) || 1)}
+                                                            onChange={(e) => updateOrderItem(item.id, 'quantity', parseInt(e.target.value) || 0)}
                                                         />
                                                     </div>
                                                     <div className="space-y-2">
