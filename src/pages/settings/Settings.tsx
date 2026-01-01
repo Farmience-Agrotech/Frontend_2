@@ -13,12 +13,24 @@ import { useToast } from '@/hooks/use-toast.ts';
 import { UsersRolesTab } from '@/components/settings/UsersRolesTab.tsx';
 import { usePermissions } from '@/hooks/usePermissions.ts';
 import { useUsers } from '@/contexts/UsersContext';
+import { useSettings } from '@/contexts/SettingsContext';
+import { Package } from 'lucide-react';
 
 export default function Settings() {
   const { toast } = useToast();
   const { hasPermission } = usePermissions();
   const { currentUser, updateUser } = useUsers();
-  const [theme, setTheme] = useState<'light' | 'dark'>('light');
+
+  // Use settings context
+  const {
+    orderSettings,
+    setAllowZeroStockOrders,
+    setRequireApprovalForZeroStock,
+    notificationSettings,
+    updateNotificationSettings,
+    appSettings,
+    setTheme: updateTheme,
+  } = useSettings();
 
   // Profile form state
   const [profileData, setProfileData] = useState({
@@ -29,12 +41,7 @@ export default function Settings() {
   
   const canViewUserManagement = hasPermission('userManagement', 'view');
   
-  const [notifications, setNotifications] = useState({
-    newQuotes: true,
-    orderUpdates: true,
-    lowStock: true,
-    paymentReceived: false,
-  });
+
 
   const handleSave = (section: string) => {
     toast({
@@ -208,12 +215,12 @@ export default function Settings() {
                     <p className="text-sm text-muted-foreground">Switch between light and dark mode</p>
                   </div>
                   <div className="flex items-center gap-2">
-                    <span className={theme === 'light' ? 'font-medium' : 'text-muted-foreground'}>Light</span>
+                    <span className={appSettings.theme === 'light' ? 'font-medium' : 'text-muted-foreground'}>Light</span>
                     <Switch
-                      checked={theme === 'dark'}
-                      onCheckedChange={(checked) => setTheme(checked ? 'dark' : 'light')}
+                        checked={appSettings.theme === 'dark'}
+                        onCheckedChange={(checked) => updateTheme(checked ? 'dark' : 'light')}
                     />
-                    <span className={theme === 'dark' ? 'font-medium' : 'text-muted-foreground'}>Dark</span>
+                    <span className={appSettings.theme === 'dark' ? 'font-medium' : 'text-muted-foreground'}>Dark</span>
                   </div>
                 </div>
 
@@ -226,8 +233,8 @@ export default function Settings() {
                         <p className="text-sm text-muted-foreground">Get notified when you receive a new quote request</p>
                       </div>
                       <Switch
-                        checked={notifications.newQuotes}
-                        onCheckedChange={(checked) => setNotifications({ ...notifications, newQuotes: checked })}
+                          checked={notificationSettings.newQuotes}
+                          onCheckedChange={(checked) => updateNotificationSettings({ newQuotes: checked })}
                       />
                     </div>
                     <div className="flex items-center justify-between">
@@ -236,8 +243,8 @@ export default function Settings() {
                         <p className="text-sm text-muted-foreground">Get notified on order status changes</p>
                       </div>
                       <Switch
-                        checked={notifications.orderUpdates}
-                        onCheckedChange={(checked) => setNotifications({ ...notifications, orderUpdates: checked })}
+                          checked={notificationSettings.orderUpdates}
+                          onCheckedChange={(checked) => updateNotificationSettings({ orderUpdates: checked })}
                       />
                     </div>
                     <div className="flex items-center justify-between">
@@ -246,8 +253,8 @@ export default function Settings() {
                         <p className="text-sm text-muted-foreground">Get alerts when products are running low</p>
                       </div>
                       <Switch
-                        checked={notifications.lowStock}
-                        onCheckedChange={(checked) => setNotifications({ ...notifications, lowStock: checked })}
+                          checked={notificationSettings.lowStock}
+                          onCheckedChange={(checked) => updateNotificationSettings({ lowStock: checked })}
                       />
                     </div>
                     <div className="flex items-center justify-between">
@@ -256,10 +263,48 @@ export default function Settings() {
                         <p className="text-sm text-muted-foreground">Get notified when payments are received</p>
                       </div>
                       <Switch
-                        checked={notifications.paymentReceived}
-                        onCheckedChange={(checked) => setNotifications({ ...notifications, paymentReceived: checked })}
+                          checked={notificationSettings.paymentReceived}
+                          onCheckedChange={(checked) => updateNotificationSettings({ paymentReceived: checked })}
                       />
                     </div>
+                  </div>
+                </div>
+
+                {/* Order Settings Section */}
+                <div className="border-t pt-6">
+                  <h3 className="font-medium mb-4 flex items-center gap-2">
+                    <Package className="h-4 w-4" />
+                    Order Settings
+                  </h3>
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-between">
+                      <div className="space-y-0.5">
+                        <Label>Allow Orders with Zero Inventory</Label>
+                        <p className="text-sm text-muted-foreground">
+                          Allow placing orders even when product stock is zero.
+                          Useful for pre-orders or made-to-order products.
+                        </p>
+                      </div>
+                      <Switch
+                          checked={orderSettings.allowZeroStockOrders}
+                          onCheckedChange={(checked) => setAllowZeroStockOrders(checked)}
+                      />
+                    </div>
+
+                    {orderSettings.allowZeroStockOrders && (
+                        <div className="flex items-center justify-between pl-4 border-l-2 border-muted">
+                          <div className="space-y-0.5">
+                            <Label>Show Warning Badge</Label>
+                            <p className="text-sm text-muted-foreground">
+                              Display a warning indicator on products with zero stock
+                            </p>
+                          </div>
+                          <Switch
+                              checked={orderSettings.requireApprovalForZeroStock}
+                              onCheckedChange={(checked) => setRequireApprovalForZeroStock(checked)}
+                          />
+                        </div>
+                    )}
                   </div>
                 </div>
 

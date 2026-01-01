@@ -8,6 +8,7 @@ import { UsersProvider } from "./contexts/UsersContext";
 import { AuthProvider } from "./hooks/AuthContext";
 import { ProtectedRoute } from "./components/ProtectedRoute";
 import { AuthGuard } from "./components/AuthGuard";
+import { SettingsProvider } from "./contexts/SettingsContext";
 
 // Pages
 import Login from "./pages/auth/Login";
@@ -31,7 +32,8 @@ const App = () => (
         <AuthProvider>
           <RolesProvider>
             <UsersProvider>
-              <TooltipProvider>
+                <SettingsProvider>
+                <TooltipProvider>
                 <Toaster />
                 <Sonner />
                 <Routes>
@@ -160,6 +162,7 @@ const App = () => (
                   <Route path="*" element={<NotFound />} />
                 </Routes>
               </TooltipProvider>
+                </SettingsProvider>
             </UsersProvider>
           </RolesProvider>
         </AuthProvider>

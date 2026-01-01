@@ -33,9 +33,11 @@ import {
 // ✅ Import useCustomers hook instead of mockCustomers
 import { useCreateOrder, useProducts, useCustomers } from '@/hooks/useApi';
 import type { ApiCustomer } from '@/api/customers.api';
-import { Loader2, Check, ChevronsUpDown, Building2, Phone, Mail, MapPin, Plus, Trash2, Package, Percent } from 'lucide-react';
+import { Loader2, Check, ChevronsUpDown, Building2, Phone, Mail, MapPin, Plus, Trash2, Package, Percent, AlertTriangle } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils.ts';
+import { useSettings } from '@/contexts/SettingsContext';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge.tsx';
 
 interface OrderItem {
@@ -59,6 +61,27 @@ export function AddOrderDialog({ open, onOpenChange }: AddOrderDialogProps) {
     const { data: apiCustomers, isLoading: customersLoading } = useCustomers();
     const { toast } = useToast();
 
+    const { orderSettings } = useSettings();
+
+   // Get stock for a product (assuming stock info is in products data)
+    const getProductStock = (productId: string): number => {
+        if (!apiProducts) return 0;
+        const product = (apiProducts as any[]).find(p => p._id === productId);
+        return product?.stock ?? product?.currentStock ?? product?.quantity ?? 999; // Default to 999 if no stock field
+    };
+
+    const [orderItems, setOrderItems] = useState<OrderItem[]>([
+        { id: `item-${Date.now()}`, productId: '', quantity: 1, price: 0, taxPercentage: 18, popoverOpen: false }
+    ]);
+
+// Check if any selected product has zero stock (MUST be after orderItems)
+    const hasZeroStockItems = useMemo(() => {
+        return orderItems.some(item => {
+            if (!item.productId) return false;
+            return getProductStock(item.productId) === 0;
+        });
+    }, [orderItems, apiProducts]);
+
     const [customerPopoverOpen, setCustomerPopoverOpen] = useState(false);
     const [selectedCustomerId, setSelectedCustomerId] = useState('');
     const [priority, setPriority] = useState('medium');
@@ -67,11 +90,6 @@ export function AddOrderDialog({ open, onOpenChange }: AddOrderDialogProps) {
     // ✅ Discount (percentage) and Shipping Fee
     const [discountPercent, setDiscountPercent] = useState(0);
     const [shippingFee, setShippingFee] = useState(0);
-
-    // ✅ Multiple order items with tax percentage
-    const [orderItems, setOrderItems] = useState<OrderItem[]>([
-        { id: `item-${Date.now()}`, productId: '', quantity: 1, price: 0, taxPercentage: 18, popoverOpen: false }
-    ]);
 
     // ✅ Transform API customers to consistent format
     const customers = useMemo(() => {
@@ -241,6 +259,16 @@ export function AddOrderDialog({ open, onOpenChange }: AddOrderDialogProps) {
             toast({
                 title: "Products Required",
                 description: "Please add at least one product",
+                variant: "destructive",
+            });
+            return;
+        }
+
+        // Check for zero stock items
+        if (hasZeroStockItems && !orderSettings.allowZeroStockOrders) {
+            toast({
+                title: "Out of Stock",
+                description: "One or more products have zero inventory. Enable 'Allow Zero Stock Orders' in Settings → Preferences to proceed.",
                 variant: "destructive",
             });
             return;
@@ -630,6 +658,17 @@ export function AddOrderDialog({ open, onOpenChange }: AddOrderDialogProps) {
                             rows={3}
                         />
                     </div>
+
+                    {/* Zero Stock Warning */}
+                    {hasZeroStockItems && orderSettings.allowZeroStockOrders && (
+                        <Alert className="border-amber-200 bg-amber-50">
+                            <AlertTriangle className="h-4 w-4 text-amber-600" />
+                            <AlertDescription className="text-amber-800">
+                                <strong>Warning:</strong> One or more products have zero inventory.
+                                This order will be processed as a backorder.
+                            </AlertDescription>
+                        </Alert>
+                    )}
 
                     {/* ✅ Order Summary with Editable Discount & Shipping */}
                     <div className="bg-muted/50 rounded-lg p-4 space-y-3">
