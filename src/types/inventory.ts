@@ -20,13 +20,18 @@ export interface Product {
   name: string;
   description: string;
   category: string;
+  categories?: string[];
   templateId?: string;
   stockQuantity: number;
   minStockLevel: number;
-  minOrderLevel?: number; // NEW: Minimum Order Quantity (MOQ)
+  minOrderLevel?: number;
   unit: string;
   customFields: Record<string, string | number | boolean>;
   images: string[];
+  minPrice?: number;
+  maxPrice?: number;
+  taxPercentage?: string;
+  inventoryLocation?: string;
   createdAt: Date;
   updatedAt: Date;
 }

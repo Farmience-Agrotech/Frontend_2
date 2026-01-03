@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { DashboardLayout } from '@/components/layout/DashboardLayout.tsx';
 import { SupplierStats } from '@/components/suppliers/SupplierStats.tsx';
 import { SupplierFilters } from '@/components/suppliers/SupplierFilters.tsx';
@@ -6,12 +6,13 @@ import { SuppliersTable } from '@/components/suppliers/SuppliersTable.tsx';
 import { AddSupplierDialog } from '@/components/suppliers/AddSupplierDialog.tsx';
 import { BlacklistDialog } from '@/components/suppliers/BlacklistDialog.tsx';
 import { Button } from '@/components/ui/button.tsx';
-import { Plus, Trash2, Loader2 } from 'lucide-react';
+import { Plus, Trash2, Loader2, AlertCircle } from 'lucide-react';
 import { Supplier, SupplierStatus } from '@/types/supplier.ts';
 import { DateRange } from 'react-day-picker';
 import { toast } from '@/hooks/use-toast.ts';
 import { isWithinInterval, parseISO } from 'date-fns';
 import { usePermissions } from '@/hooks/usePermissions.ts';
+import { Alert, AlertDescription } from '@/components/ui/alert.tsx';
 
 // ✅ Import API hooks
 import { useSuppliers, useCreateSupplier, useUpdateSupplier } from '@/hooks/useApi';
@@ -23,6 +24,22 @@ const Suppliers = () => {
   const { data: apiSuppliers, isLoading, error } = useSuppliers();
   const createSupplierMutation = useCreateSupplier();
   const updateSupplierMutation = useUpdateSupplier();
+
+//  Show error toast once when error occurs
+  useEffect(() => {
+    if (error) {
+      const isHtmlError = error?.message?.includes('<!DOCTYPE') || error?.message?.includes('<html');
+      const errorMessage = isHtmlError
+          ? 'Unable to connect to the server. Please check if the backend is running.'
+          : error?.message;
+
+      toast({
+        title: 'Failed to load suppliers',
+        description: errorMessage,
+        variant: 'destructive',
+      });
+    }
+  }, [error]);
 
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<SupplierStatus | 'all'>('all');
@@ -200,29 +217,14 @@ const Suppliers = () => {
     setSelectedSuppliers([]);
   };
 
-  // ✅ Loading state
-  if (isLoading) {
-    return (
-        <DashboardLayout>
-          <div className="flex items-center justify-center h-64">
-            <Loader2 className="h-8 w-8 animate-spin text-primary" />
-            <span className="ml-2">Loading suppliers...</span>
-          </div>
-        </DashboardLayout>
-    );
-  }
-
-  // ✅ Error state
-  if (error) {
-    return (
-        <DashboardLayout>
-          <div className="flex flex-col items-center justify-center h-64 text-destructive">
-            <p>Failed to load suppliers</p>
-            <p className="text-sm">{error?.message}</p>
-          </div>
-        </DashboardLayout>
-    );
-  }
+// ✅ Get error message for display
+  const getErrorMessage = () => {
+    if (!error) return null;
+    const isHtmlError = error?.message?.includes('<!DOCTYPE') || error?.message?.includes('<html');
+    return isHtmlError
+        ? 'Unable to connect to the server. Please check if the backend is running.'
+        : error?.message;
+  };
 
   return (
       <DashboardLayout>
@@ -249,6 +251,23 @@ const Suppliers = () => {
             </div>
           </div>
 
+          {/* Error Alert - Shows inline instead of blocking UI */}
+          {error && (
+              <Alert variant="destructive">
+                <AlertCircle className="h-4 w-4" />
+                <AlertDescription>
+                  {getErrorMessage()}
+                  <Button
+                      variant="link"
+                      className="ml-2 p-0 h-auto text-destructive underline"
+                      onClick={() => window.location.reload()}
+                  >
+                    Try again
+                  </Button>
+                </AlertDescription>
+              </Alert>
+          )}
+
           {/* Stats */}
           <SupplierStats stats={stats} />
 
@@ -265,15 +284,22 @@ const Suppliers = () => {
               onClearFilters={handleClearFilters}
           />
 
-          {/* Table */}
-          <SuppliersTable
-              suppliers={filteredSuppliers}
-              selectedSuppliers={selectedSuppliers}
-              onSelectionChange={setSelectedSuppliers}
-              onEdit={handleEdit}
-              onDeactivate={handleDeactivate}
-              onBlacklist={handleBlacklistClick}
-          />
+          {/* Table - Shows loading state or empty table */}
+          {isLoading ? (
+              <div className="flex items-center justify-center h-64 border rounded-lg">
+                <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                <span className="ml-2">Loading suppliers...</span>
+              </div>
+          ) : (
+              <SuppliersTable
+                  suppliers={filteredSuppliers}
+                  selectedSuppliers={selectedSuppliers}
+                  onSelectionChange={setSelectedSuppliers}
+                  onEdit={handleEdit}
+                  onDeactivate={handleDeactivate}
+                  onBlacklist={handleBlacklistClick}
+              />
+          )}
 
           {/* Dialogs */}
           <AddSupplierDialog

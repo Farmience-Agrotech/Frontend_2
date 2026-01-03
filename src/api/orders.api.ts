@@ -439,6 +439,9 @@ export const updateQuotation = async (
         products?: BackendQuotationProduct[];
         quotedTotal?: number;
         notes?: string;
+        shippingCost?: number;
+        discount?: number;
+        totalAmount?: number;
     }
 ): Promise<ApiOrder> => {
     try {

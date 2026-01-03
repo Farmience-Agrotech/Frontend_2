@@ -40,12 +40,28 @@ export const deleteMultipleProducts = async (ids: string[]): Promise<void> => {
 };
 
 // -----------------------------------------------------------------------------
+// UPDATE PRODUCT
+// -----------------------------------------------------------------------------
+
+export const updateProduct = async (
+    id: string,
+    data: Partial<CreateProductRequest>
+): Promise<Product> => {
+    const response = await apiClient.patch<Product>('/products/update', {
+        productId: id,
+        values: data,
+    });
+    return response.data;
+};
+
+// -----------------------------------------------------------------------------
 // EXPORT ALL
 // -----------------------------------------------------------------------------
 
 const productsApi = {
     list: listProducts,
     create: createProduct,
+    update: updateProduct,
     delete: deleteProduct,
     deleteBulk: deleteMultipleProducts,
 };
