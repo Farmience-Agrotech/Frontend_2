@@ -64,6 +64,7 @@ import {
 
 // Invoice Components
 import { InvoiceViewDialog } from '@/components/invoices/InvoiceViewDialog';
+import { ProductionSourcingDialog } from '@/components/orders/ProductionSourcingDialog';
 import { GeneratedInvoice, InvoiceType } from '@/types/invoice';
 import { useReactToPrint } from 'react-to-print';
 import html2pdf from 'html2pdf.js';
@@ -250,6 +251,7 @@ export default function OrderDetail() {
   const [quotedPrices, setQuotedPrices] = useState<Record<string, number>>({});
   const [quoteNotes, setQuoteNotes] = useState('');
   const [showProcessingDialog, setShowProcessingDialog] = useState(false);
+  const [showProductionSourcingDialog, setShowProductionSourcingDialog] = useState(false);
   const [showShippedDialog, setShowShippedDialog] = useState(false);
   const [showDeliveredDialog, setShowDeliveredDialog] = useState(false);
   const [transitionNote, setTransitionNote] = useState('');
@@ -1376,7 +1378,7 @@ export default function OrderDetail() {
                       <div className="flex flex-wrap gap-3 mt-4">
                         {(frontendStatus === 'order_booked' || frontendStatus === 'payment_pending') && (
                             <Button
-                                onClick={() => setShowProcessingDialog(true)}
+                                onClick={() => setShowProductionSourcingDialog(true)}
                                 className="bg-blue-600 hover:bg-blue-700"
                             >
                               <Check className="h-4 w-4 mr-2" />
@@ -2010,6 +2012,15 @@ export default function OrderDetail() {
             onDownload={handleDialogDownload}
             onSend={handleDialogSend}
             printRef={printRef}
+        />
+        {/* Production Sourcing Dialog */}
+        <ProductionSourcingDialog
+            open={showProductionSourcingDialog}
+            onOpenChange={setShowProductionSourcingDialog}
+            orderId={id || ''}
+            orderNumber={order.orderNumber}
+            itemsCount={apiOrder?.items?.length || 0}
+            totalAmount={companyQuotedTotal}
         />
         {/* Processing Confirmation Dialog */}
         <Dialog open={showProcessingDialog} onOpenChange={setShowProcessingDialog}>

@@ -1,4 +1,4 @@
-import { Package, LayoutDashboard, Boxes, Users, Factory, Settings, ShoppingCart, LogOut } from 'lucide-react';
+import { Package, LayoutDashboard, Boxes, Users, Factory, Settings, ShoppingCart, LogOut, ClipboardList } from 'lucide-react';
 import { NavLink, useLocation } from 'react-router-dom';
 import { cn } from '@/lib/utils';
 import { useUsers } from '@/contexts/UsersContext';
@@ -29,6 +29,7 @@ interface NavItem {
 const mainNavItems: NavItem[] = [
   { title: 'Dashboard', url: '/dashboard', icon: LayoutDashboard, module: 'dashboard' },
   { title: 'Orders', url: '/orders', icon: ShoppingCart, module: 'orders' },
+  { title: 'Production & Sourcing', url: '/production', icon: ClipboardList, module: 'orders' },
   { title: 'Inventory', url: '/inventory', icon: Boxes, module: 'inventory' },
   { title: 'Customers', url: '/customers', icon: Users, module: 'customers' },
   { title: 'Suppliers', url: '/suppliers', icon: Factory, module: 'suppliers' },

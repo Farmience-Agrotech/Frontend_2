@@ -23,6 +23,8 @@ import Customers from "./pages/customers/Customers";
 import CustomerDetail from "./pages/customers/CustomerDetail";
 import Settings from "./pages/settings/Settings";
 import NotFound from "./pages/NotFound";
+import Production from "./pages/production/Production";
+import ProductionSourcing from "./pages/orders/ProductionSourcing";
 
 const queryClient = new QueryClient();
 
@@ -70,19 +72,41 @@ const App = () => (
                       }
                   />
 
-                  <Route
-                      path="/orders/:id"
-                      element={
-                        <AuthGuard>
-                          <ProtectedRoute module="orders">
-                            <OrderDetail />
-                          </ProtectedRoute>
-                        </AuthGuard>
-                      }
-                  />
+                    <Route
+                        path="/orders/:id"
+                        element={
+                            <AuthGuard>
+                                <ProtectedRoute module="orders">
+                                    <OrderDetail />
+                                </ProtectedRoute>
+                            </AuthGuard>
+                        }
+                    />
 
-                  <Route
-                      path="/inventory"
+                    <Route
+                        path="/orders/:id/production"
+                        element={
+                            <AuthGuard>
+                                <ProtectedRoute module="orders">
+                                    <ProductionSourcing />
+                                </ProtectedRoute>
+                            </AuthGuard>
+                        }
+                    />
+
+                    <Route
+                        path="/production"
+                        element={
+                            <AuthGuard>
+                                <ProtectedRoute module="orders">
+                                    <Production />
+                                </ProtectedRoute>
+                            </AuthGuard>
+                        }
+                    />
+
+                    <Route
+                        path="/inventory"
                       element={
                         <AuthGuard>
                           <ProtectedRoute module="inventory">

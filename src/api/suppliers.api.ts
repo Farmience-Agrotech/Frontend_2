@@ -39,7 +39,7 @@ export interface ApiSupplier {
 // LIST SUPPLIERS
 // -----------------------------------------------------------------------------
 export const listSuppliers = async (): Promise<ApiSupplier[]> => {
-    const response = await apiClient.get<ApiSupplier[]>('/suppliers/list');
+    const response = await apiClient.get<ApiSupplier[]>('/users/supplier/list');
     return response.data;
 };
 
@@ -47,7 +47,7 @@ export const listSuppliers = async (): Promise<ApiSupplier[]> => {
 // CREATE SUPPLIER
 // -----------------------------------------------------------------------------
 export const createSupplier = async (data: Partial<ApiSupplier>): Promise<ApiSupplier> => {
-    const response = await apiClient.post<ApiSupplier>('/suppliers/create', data);
+    const response = await apiClient.post<ApiSupplier>('/users/supplier/create', data);
     return response.data;
 };
 
@@ -55,8 +55,18 @@ export const createSupplier = async (data: Partial<ApiSupplier>): Promise<ApiSup
 // UPDATE SUPPLIER
 // -----------------------------------------------------------------------------
 export const updateSupplier = async (id: string, data: Partial<ApiSupplier>): Promise<ApiSupplier> => {
-    const response = await apiClient.put<ApiSupplier>(`/suppliers/update/${id}`, data);
+    const response = await apiClient.patch<ApiSupplier>('/users/supplier/edit', {
+        supplierId: id,
+        values: data
+    });
     return response.data;
+};
+
+// -----------------------------------------------------------------------------
+// DELETE SUPPLIER
+// -----------------------------------------------------------------------------
+export const deleteSupplier = async (id: string): Promise<void> => {
+    await apiClient.delete(`/users/supplier/delete/${id}`);
 };
 
 // -----------------------------------------------------------------------------
@@ -66,6 +76,7 @@ export const suppliersApi = {
     list: listSuppliers,
     create: createSupplier,
     update: updateSupplier,
+    delete: deleteSupplier,
 };
 
 export default suppliersApi;
