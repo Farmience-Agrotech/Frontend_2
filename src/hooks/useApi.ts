@@ -175,6 +175,35 @@ export function useDeleteProduct() {
 }
 
 // -----------------------------------------------------------------------------
+// UPDATE PRODUCT
+// -----------------------------------------------------------------------------
+
+export function useUpdateProduct() {
+    const queryClient = useQueryClient();
+    const { toast } = useToast();
+
+    return useMutation({
+        mutationFn: ({ id, data }: { id: string; data: Partial<CreateProductRequest> }) =>
+            productsApi.update(id, data),
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: queryKeys.products });
+            queryClient.invalidateQueries({ queryKey: queryKeys.inventory });
+            toast({
+                title: 'Product Updated',
+                description: 'Product has been updated successfully',
+            });
+        },
+        onError: (error: Error) => {
+            toast({
+                title: 'Failed to Update Product',
+                description: error.message,
+                variant: 'destructive',
+            });
+        },
+    });
+}
+
+// -----------------------------------------------------------------------------
 // DELETE MULTIPLE PRODUCTS
 // -----------------------------------------------------------------------------
 

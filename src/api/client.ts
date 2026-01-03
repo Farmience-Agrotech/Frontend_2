@@ -66,8 +66,11 @@ apiClient.interceptors.request.use(
 const extractErrorMessage = (data: any): string | null => {
     if (!data) return null;
 
-    // If data is a string, return it directly
+    // If data is a string, check if it's HTML (server error page)
     if (typeof data === 'string') {
+        if (data.includes('<!DOCTYPE') || data.includes('<html')) {
+            return 'Server error - endpoint not found or server unavailable';
+        }
         return data;
     }
 

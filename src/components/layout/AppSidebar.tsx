@@ -31,7 +31,7 @@ const mainNavItems: NavItem[] = [
   { title: 'Orders', url: '/orders', icon: ShoppingCart, module: 'orders' },
   { title: 'Inventory', url: '/inventory', icon: Boxes, module: 'inventory' },
   { title: 'Customers', url: '/customers', icon: Users, module: 'customers' },
-  // { title: 'Suppliers', url: '/suppliers', icon: Factory, module: 'suppliers' },
+  { title: 'Suppliers', url: '/suppliers', icon: Factory, module: 'suppliers' },
 ];
 
 export function AppSidebar() {

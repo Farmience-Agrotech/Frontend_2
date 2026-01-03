@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Edit, Package, AlertTriangle, ImageIcon, Loader2, Layers, Trash2 } from 'lucide-react';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
@@ -7,8 +7,12 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { StockBadge } from '@/components/inventory/StockBadge';
-import { useProduct, useInventory, useTemplates, useDeleteProduct } from '@/hooks/useApi';
+import { useProduct, useInventory, useTemplates, useDeleteProduct, useProducts } from '@/hooks/useApi';
 import { usePermissions } from '@/hooks/usePermissions';
+import { AddProductDialog } from '@/components/inventory/AddProductDialog';
+import { useUpdateProduct } from '@/hooks/useApi';
+import { Product } from '@/types/inventory';
+
 
 
 import {
@@ -44,9 +48,31 @@ export default function ProductDetail() {
   const { data: apiProduct, isLoading: productLoading } = useProduct(id);
   const { data: apiInventory, isLoading: inventoryLoading } = useInventory();
   const { data: apiTemplates, isLoading: templatesLoading } = useTemplates();
+  const { data: allProducts } = useProducts();
   // Delete mutation and state
   const deleteProductMutation = useDeleteProduct();
+  const updateProductMutation = useUpdateProduct();
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [editDialogOpen, setEditDialogOpen] = useState(false);
+  const availableCategories = useMemo(() => {
+    const defaultCategories = [
+      'Electronics', 'Clothing', 'Food & Beverages', 'Furniture', 'Accessories',
+      'Home & Kitchen', 'Sports & Outdoors', 'Health & Beauty', 'Toys & Games',
+      'Books & Stationery', 'Automotive', 'Industrial',
+    ];
+
+    if (!allProducts || allProducts.length === 0) {
+      return defaultCategories;
+    }
+
+    // Extract all categories from all products
+    const productCategories = allProducts.flatMap(product => product.categories || []);
+
+    // Combine default + product categories, remove duplicates
+    const allCategories = [...new Set([...defaultCategories, ...productCategories])];
+
+    return allCategories.sort();
+  }, [allProducts]);
 
   // Find inventory entry for this product
   const inventoryEntry = apiInventory?.find((inv) => inv.product === id);
@@ -68,6 +94,34 @@ export default function ProductDetail() {
         localStorage.setItem(IMAGES_DATA_KEY, JSON.stringify(currentImagesData));
       }
       navigate('/inventory');
+    } catch {
+      // Error handled by hook
+    }
+  };
+
+  const handleSaveProduct = async (productData: Partial<Product>) => {
+    if (!id) return;
+
+    try {
+      await updateProductMutation.mutateAsync({
+        id,
+        data: {
+          name: productData.name,
+          sku: productData.sku,
+          description: productData.description,
+          categories: productData.categories || [productData.category],
+          stockQuantity: productData.stockQuantity,
+          minStockLevel: productData.minStockLevel,
+          minOrderLevel: productData.minOrderLevel,
+          unit: productData.unit,
+          minPrice: productData.minPrice,
+          maxPrice: productData.maxPrice,
+          taxRate: productData.taxPercentage ? Number(productData.taxPercentage) : undefined,
+          inventoryLocation: productData.inventoryLocation,
+          ...(productData.templateId ? { templateId: productData.templateId } : {}),
+        },
+      });
+      setEditDialogOpen(false);
     } catch {
       // Error handled by hook
     }
@@ -216,7 +270,7 @@ export default function ProductDetail() {
             </div>
             <div className="flex gap-2">
               {canEdit('inventory') && (
-                  <Button variant="outline" onClick={() => navigate('/inventory')}>
+                  <Button variant="outline" onClick={() => setEditDialogOpen(true)}>
                     <Edit className="mr-2 h-4 w-4" />
                     Edit Product
                   </Button>
@@ -505,6 +559,47 @@ export default function ProductDetail() {
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
+        {/* ADD Edit Product Dialog */}
+        <AddProductDialog
+            open={editDialogOpen}
+            onOpenChange={setEditDialogOpen}
+            editProduct={{
+              id: id || '',
+              sku: productSku,
+              name: productName,
+              description: productDescription,
+              category: productCategory,
+              categories: categories,
+              stockQuantity: stockQuantity,
+              minStockLevel: minStockLevel,
+              minOrderLevel: minOrderLevel,
+              unit: productUnit,
+              customFields: mergedTemplateValues,
+              images: productImages,
+              templateId: apiProduct.templateId,
+              createdAt: new Date(apiProduct.createdAt || Date.now()),
+              updatedAt: new Date(apiProduct.updatedAt || Date.now()),
+              minPrice: minPrice,
+              maxPrice: maxPrice,
+              taxPercentage: taxRate?.toString(),
+              inventoryLocation: inventoryLocation,
+            } as Product & { categories?: string[]; minPrice?: number; maxPrice?: number; taxPercentage?: string; inventoryLocation?: string }}
+            onSave={handleSaveProduct}
+            templates={apiTemplates?.map(t => ({
+              id: t.id || t._id,
+              name: t.name,
+              description: t.description,
+              fields: t.fields.map(f => ({
+                id: f.id,
+                name: f.name,
+                type: f.type as 'text' | 'number' | 'select' | 'boolean' | 'date',
+                required: f.required ?? false,
+                options: f.options,
+              })),
+              createdAt: t.createdAt,
+            })) || []}
+            availableCategories={availableCategories}
+        />
       </DashboardLayout>
   );
 }

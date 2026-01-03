@@ -779,6 +779,23 @@ export default function OrderDetail() {
     if (!apiOrder) return;
 
     try {
+      // Calculate updated totalAmount
+      let totalBasePrice = 0;
+      let totalTax = 0;
+
+      apiOrder.items.forEach(item => {
+        const product = productLookup[item.productId];
+        const quotedPrice = item.quotedPrice || item.targetPrice || item.price || 0;
+        const taxRate = product?.taxRate || 0;
+        const { basePrice, taxAmount } = calculateTaxBreakdown(quotedPrice, taxRate);
+        totalBasePrice += basePrice * item.quantity;
+        totalTax += taxAmount * item.quantity;
+      });
+
+      const newTotalAmount = Math.round(
+          (totalBasePrice + totalTax + editFormData.shippingCost - editFormData.discount) * 100
+      ) / 100;
+
       if (apiOrder.isQuotation) {
         await updateQuotationMutation.mutateAsync({
           quotationId: apiOrder._id,
@@ -786,23 +803,37 @@ export default function OrderDetail() {
             notes: editFormData.notes,
             shippingCost: editFormData.shippingCost,
             discount: editFormData.discount,
+            totalAmount: newTotalAmount,
           },
         });
       } else {
         await updateOrderMutation.mutateAsync({
           id: apiOrder._id,
           data: {
+            orderId: apiOrder.orderId || apiOrder.orderNumber,
+            orderNumber: apiOrder.orderNumber,
             notes: editFormData.notes,
             shippingCost: editFormData.shippingCost,
             discount: editFormData.discount,
+            totalAmount: newTotalAmount,
           },
         });
       }
+
+      toast({
+        title: 'Changes Saved',
+        description: 'Order has been updated successfully.',
+      });
 
       setIsEditMode(false);
       refetch();
     } catch (error) {
       console.error('Failed to save:', error);
+      toast({
+        title: 'Error',
+        description: 'Failed to save changes. Please try again.',
+        variant: 'destructive',
+      });
     }
   };
 
@@ -1047,7 +1078,7 @@ export default function OrderDetail() {
 
             <div className="flex items-center gap-2">
               {/* Edit Order Button */}
-              {canEdit && !isEditMode && !needsAdminAction && (
+              {canEdit('orders') && !isEditMode && !needsAdminAction && (
                   <Button
                       variant="outline"
                       onClick={() => {
